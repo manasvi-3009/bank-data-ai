@@ -7,7 +7,7 @@ Interactive analytical assistant for querying and analyzing the banking_risk_ana
 import streamlit as st
 import pandas as pd
 from config import config
-from database import test_connection, inspect_database_schema
+from database import test_connection, inspect_database_schema, get_discovered_tables
 from sql_service import validate_sql
 
 # Page configuration
@@ -34,7 +34,7 @@ st.markdown(
         margin-bottom: 1.5rem;
     }
     .status-card {
-        padding: 1rem;
+        padding: 1rem 1.25rem;
         border-radius: 8px;
         margin-bottom: 1rem;
     }
@@ -53,14 +53,16 @@ st.markdown(
         border: 1px solid #FDE68A;
         color: #92400E;
     }
-    .metric-badge {
+    .table-badge {
         display: inline-block;
-        padding: 2px 8px;
-        border-radius: 4px;
+        padding: 4px 10px;
+        margin: 3px;
+        border-radius: 6px;
         font-size: 0.85rem;
         font-weight: 600;
-        background: #EEF2F6;
+        background: #F1F5F9;
         color: #334155;
+        border: 1px solid #E2E8F0;
     }
     </style>
     """,
@@ -69,28 +71,29 @@ st.markdown(
 
 
 def render_sidebar():
-    """Renders the application sidebar with connection status and settings."""
+    """Renders the application sidebar with connection status and diagnostics."""
     with st.sidebar:
         st.header("🏦 System Diagnostics")
 
-        # Database Configuration Check
+        # Database Connection Check
         if not config.is_database_configured:
-            st.error("⚠️ **DATABASE_URL Not Configured**")
+            st.markdown("### Database: **Not Connected**")
+            st.error("⚠️ `DATABASE_URL` is not configured.")
             st.info(
-                "To connect to your MySQL database, create a `.env` file in the project root:\n\n"
-                "```bash\n"
-                "DATABASE_URL=mysql+pymysql://<user>:<password>@localhost:3306/banking_risk_analytics\n"
+                "Configure your `.env` file with your MySQL credentials:\n\n"
+                "```env\n"
+                "DATABASE_URL=mysql+pymysql://root:password@localhost:3306/banking_risk_analytics\n"
                 "```"
             )
         else:
             is_connected, msg = test_connection()
             if is_connected:
-                st.success("🟢 **MySQL Database Connected**")
+                st.markdown("### Database: **🟢 Connected**")
                 st.caption(f"**Target:** `{config.get_masked_db_url()}`")
             else:
-                st.error("🔴 **Connection Failed**")
-                st.caption(f"Error: {msg}")
-                st.warning("Please check your MySQL server status and credentials in `.env`.")
+                st.markdown("### Database: **🔴 Not Connected**")
+                st.error(f"**Status:** {msg}")
+                st.caption(f"**Configured Host:** `{config.get_masked_db_url()}`")
 
         st.divider()
 
@@ -105,9 +108,9 @@ def render_sidebar():
 
         st.divider()
 
-        # Project Info
-        st.subheader("📚 Known Tables")
-        known_tables = [
+        # Known Banking Tables Reference
+        st.subheader("📚 Expected Tables")
+        expected_tables = [
             "accounts",
             "branches",
             "credit_cards",
@@ -116,24 +119,24 @@ def render_sidebar():
             "loans",
             "transactions",
         ]
-        for tbl in known_tables:
+        for tbl in expected_tables:
             st.markdown(f"- `{tbl}`")
 
         st.divider()
         st.caption("Bank Data AI — Initial Foundation v0.1.0")
 
 
-def render_database_status(is_connected: bool, connection_msg: str):
-    """Displays connection overview badge."""
-    col1, col2 = st.columns([3, 1])
+def render_database_status_card(is_connected: bool, connection_msg: str):
+    """Displays prominent top status banner."""
+    col1, col2 = st.columns([4, 1])
 
     with col1:
         if not config.is_database_configured:
             st.markdown(
                 """
                 <div class="status-card status-warning">
-                    <strong>⚠️ Database connection pending:</strong> <code>DATABASE_URL</code> is not set in environment.
-                    Please copy <code>.env.example</code> to <code>.env</code> and provide your MySQL credentials.
+                    <strong>⚠️ Database: Not Connected</strong> — <code>DATABASE_URL</code> is missing from environment.
+                    Please configure your <code>.env</code> file with valid MySQL credentials.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -142,7 +145,7 @@ def render_database_status(is_connected: bool, connection_msg: str):
             st.markdown(
                 f"""
                 <div class="status-card status-connected">
-                    <strong>🟢 Connected to MySQL:</strong> <code>banking_risk_analytics</code> ({config.get_masked_db_url()})
+                    <strong>🟢 Database: Connected</strong> — Successfully connected to <code>banking_risk_analytics</code> ({config.get_masked_db_url()})
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -151,48 +154,62 @@ def render_database_status(is_connected: bool, connection_msg: str):
             st.markdown(
                 f"""
                 <div class="status-card status-disconnected">
-                    <strong>🔴 Database connection error:</strong> {connection_msg}
+                    <strong>🔴 Database: Not Connected</strong> — {connection_msg}
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
     with col2:
-        if st.button("🔄 Refresh Connection", use_container_width=True):
+        if st.button("🔄 Test Connection", use_container_width=True):
             st.rerun()
 
 
 def render_schema_explorer(is_connected: bool):
-    """Renders the discovered database schema metadata."""
+    """Renders the discovered database schema metadata and expandable details."""
     st.subheader("📊 Dynamic Schema Discovery")
 
     if not is_connected:
-        st.info("Connect to the `banking_risk_analytics` database to view discovered tables, columns, and relationships.")
+        st.info(
+            "🔒 **Schema inspection unavailable while disconnected.**\n\n"
+            "Connect to the MySQL server hosting `banking_risk_analytics` to inspect real discovered tables, columns, data types, and foreign key relations."
+        )
         return
 
     try:
-        with st.spinner("Inspecting database schema..."):
+        with st.spinner("Dynamically inspecting database schema via SQLAlchemy Inspector..."):
             schema_data = inspect_database_schema()
 
         table_names = schema_data.get("table_names", [])
 
         if not table_names:
-            st.warning("Connected to database, but no tables were discovered.")
+            st.warning("Connected to database, but no tables were discovered in `banking_risk_analytics`.")
             return
 
-        st.caption(f"Discovered **{len(table_names)} tables** dynamically from MySQL:")
+        # Summary Metrics
+        total_cols = sum(len(tbl.get("columns", [])) for tbl in schema_data.get("tables", {}).values())
+        col_m1, col_m2 = st.columns(2)
+        col_m1.metric("Discovered Tables", len(table_names))
+        col_m2.metric("Total Discovered Columns", total_cols)
 
-        # Display tabs for each discovered table
-        tabs = st.tabs([f"📋 {tbl}" for tbl in table_names])
+        # Discovered Table Badges
+        st.markdown("**Discovered Tables:**")
+        badges_html = " ".join([f'<span class="table-badge">📋 {tbl}</span>' for tbl in table_names])
+        st.markdown(f"<div>{badges_html}</div>", unsafe_allow_html=True)
+        st.markdown("")
 
-        for idx, table_name in enumerate(table_names):
-            with tabs[idx]:
-                tbl_info = schema_data["tables"].get(table_name, {})
-                cols = tbl_info.get("columns", [])
+        # Expandable Schema Details per table
+        st.markdown("### 🔍 Expandable Schema Details")
+        for table_name in table_names:
+            tbl_info = schema_data["tables"].get(table_name, {})
+            cols = tbl_info.get("columns", [])
+            fks = tbl_info.get("foreign_keys", [])
+            pks = tbl_info.get("primary_keys", [])
 
+            expander_title = f"Table: **`{table_name}`** ({len(cols)} columns, {len(pks)} PK, {len(fks)} FK)"
+            with st.expander(expander_title, expanded=False):
                 if cols:
                     df_cols = pd.DataFrame(cols)
-                    # Rename columns for clarity in UI
                     df_cols = df_cols.rename(
                         columns={
                             "name": "Column Name",
@@ -204,14 +221,13 @@ def render_schema_explorer(is_connected: bool):
                     )
                     st.dataframe(df_cols, use_container_width=True, hide_index=True)
 
-                # Show foreign keys if present
-                fks = tbl_info.get("foreign_keys", [])
                 if fks:
-                    st.markdown("**Foreign Key Constraints:**")
+                    st.markdown("**Foreign Key Relationships:**")
                     for fk in fks:
-                        from_cols = ", ".join(fk["constrained_columns"])
-                        to_cols = ", ".join(fk["referred_columns"])
-                        st.markdown(f"- `{from_cols}` ➔ `{fk['referred_table']}({to_cols})`")
+                        from_cols = ", ".join(fk.get("constrained_columns", []))
+                        to_cols = ", ".join(fk.get("referred_columns", []))
+                        ref_tbl = fk.get("referred_table", "")
+                        st.markdown(f"- `{from_cols}` ➔ `{ref_tbl}({to_cols})`")
 
     except Exception as exc:
         st.error(f"Failed to inspect database schema: {str(exc)}")
@@ -276,8 +292,8 @@ def main():
     if config.is_database_configured:
         is_connected, connection_msg = test_connection()
 
-    # Main Sections
-    render_database_status(is_connected, connection_msg)
+    # Main Status Banner
+    render_database_status_card(is_connected, connection_msg)
 
     st.markdown("---")
 

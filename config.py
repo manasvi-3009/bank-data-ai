@@ -6,11 +6,17 @@ and LLM services without exposing secrets.
 """
 
 import os
+from pathlib import Path
 from urllib.parse import urlparse
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    # Explicitly locate .env in project root if available
+    _env_path = Path(__file__).resolve().parent / ".env"
+    if _env_path.exists():
+        load_dotenv(dotenv_path=_env_path, override=True)
+    else:
+        load_dotenv()
 except ImportError:
     pass
 
@@ -55,10 +61,10 @@ class AppConfig:
 
         try:
             parsed = urlparse(raw_url)
-            # Mask user:password if present
+            # Mask user:password if present using rsplit to handle '@' safely
             netloc = parsed.netloc
             if "@" in netloc:
-                auth_part, host_part = netloc.split("@", 1)
+                auth_part, host_part = netloc.rsplit("@", 1)
                 username = auth_part.split(":")[0] if ":" in auth_part else auth_part
                 masked_netloc = f"{username}:******@{host_part}"
             else:

@@ -2,7 +2,7 @@
 Database connection and schema inspection module for Bank Data AI.
 
 Provides reusable SQLAlchemy engine management, connection diagnostics,
-and dynamic schema discovery for the existing banking_risk_analytics database.
+and dynamic runtime schema discovery for the existing banking_risk_analytics database.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,7 +29,6 @@ def get_db_engine(db_url: Optional[str] = None, force_new: bool = False) -> Engi
         )
 
     if _engine is None or force_new or (db_url and db_url != str(_engine.url)):
-        # Pool settings suitable for web app workloads
         connect_args = {}
         if target_url.startswith("sqlite"):
             connect_args = {"check_same_thread": False}
@@ -57,12 +56,87 @@ def test_connection(engine: Optional[Engine] = None) -> Tuple[bool, str]:
     except ValueError as val_err:
         return False, str(val_err)
     except Exception as exc:
-        return False, f"Connection failed: {str(exc)}"
+        err_msg = str(exc)
+        # Provide user-friendly troubleshooting context without leaking secrets
+        if "1045" in err_msg or "Access denied" in err_msg:
+            return False, "Access denied. Please check your MySQL username and password in .env."
+        elif "2003" in err_msg or "getaddrinfo failed" in err_msg:
+            return (
+                False,
+                "Cannot reach MySQL host. Ensure your host is set to 'localhost' or '127.0.0.1' "
+                "(e.g. mysql+pymysql://root:password@localhost:3306/banking_risk_analytics) "
+                "and that MySQL Server is running on port 3306."
+            )
+        elif "1049" in err_msg or "Unknown database" in err_msg:
+            return False, "Database 'banking_risk_analytics' not found on this MySQL instance."
+        return False, f"Connection error: {err_msg}"
+
+
+def get_discovered_tables(engine: Optional[Engine] = None) -> List[str]:
+    """
+    Dynamically fetches the list of table names in the connected database.
+    """
+    eng = engine or get_db_engine()
+    inspector = inspect(eng)
+    return inspector.get_table_names()
+
+
+def get_table_schema(
+    table_name: str,
+    engine: Optional[Engine] = None,
+    inspector: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Dynamically retrieves column definitions, primary keys, foreign keys,
+    and indexes for a specific table.
+    """
+    insp = inspector or inspect(engine or get_db_engine())
+
+    columns_raw = insp.get_columns(table_name) or []
+    pk_constraint = insp.get_pk_constraint(table_name) or {}
+    primary_keys = set(pk_constraint.get("constrained_columns", []) or [])
+    foreign_keys = insp.get_foreign_keys(table_name) or []
+    indexes = insp.get_indexes(table_name) or []
+
+    parsed_columns: List[Dict[str, Any]] = []
+    for col in columns_raw:
+        col_name = col.get("name", "")
+        col_type = str(col.get("type", "UNKNOWN"))
+        parsed_columns.append(
+            {
+                "name": col_name,
+                "type": col_type,
+                "nullable": bool(col.get("nullable", True)),
+                "primary_key": col_name in primary_keys or bool(col.get("primary_key", 0)),
+                "default": str(col.get("default", "")) if col.get("default") is not None else None,
+            }
+        )
+
+    return {
+        "columns": parsed_columns,
+        "primary_keys": list(primary_keys),
+        "foreign_keys": [
+            {
+                "constrained_columns": fk.get("constrained_columns", []),
+                "referred_table": fk.get("referred_table", ""),
+                "referred_columns": fk.get("referred_columns", []),
+            }
+            for fk in foreign_keys
+        ],
+        "indexes": [
+            {
+                "name": idx.get("name", ""),
+                "column_names": idx.get("column_names", []),
+                "unique": bool(idx.get("unique", False)),
+            }
+            for idx in indexes
+        ],
+    }
 
 
 def inspect_database_schema(engine: Optional[Engine] = None) -> Dict[str, Any]:
     """
-    Dynamically inspects and extracts database schema metadata from the connected database.
+    Dynamically inspects and extracts database schema metadata for all discovered tables.
     Does not hardcode table or column names; reads everything via SQLAlchemy inspector.
 
     Returns a structured dictionary:
@@ -85,55 +159,15 @@ def inspect_database_schema(engine: Optional[Engine] = None) -> Dict[str, Any]:
     }
     """
     eng = engine or get_db_engine()
-    inspector = inspect(eng)
-
-    table_names = inspector.get_table_names()
+    insp = inspect(eng)
+    table_names = insp.get_table_names()
     schema_info: Dict[str, Any] = {
         "tables": {},
         "table_names": table_names,
     }
 
     for table_name in table_names:
-        columns_raw = inspector.get_columns(table_name)
-        pk_constraint = inspector.get_pk_constraint(table_name)
-        primary_keys = set(pk_constraint.get("constrained_columns", []))
-        foreign_keys = inspector.get_foreign_keys(table_name)
-        indexes = inspector.get_indexes(table_name)
-
-        parsed_columns: List[Dict[str, Any]] = []
-        for col in columns_raw:
-            col_name = col.get("name", "")
-            col_type = str(col.get("type", "UNKNOWN"))
-            parsed_columns.append(
-                {
-                    "name": col_name,
-                    "type": col_type,
-                    "nullable": bool(col.get("nullable", True)),
-                    "primary_key": col_name in primary_keys or bool(col.get("primary_key", 0)),
-                    "default": str(col.get("default", "")) if col.get("default") is not None else None,
-                }
-            )
-
-        schema_info["tables"][table_name] = {
-            "columns": parsed_columns,
-            "primary_keys": list(primary_keys),
-            "foreign_keys": [
-                {
-                    "constrained_columns": fk.get("constrained_columns", []),
-                    "referred_table": fk.get("referred_table", ""),
-                    "referred_columns": fk.get("referred_columns", []),
-                }
-                for fk in foreign_keys
-            ],
-            "indexes": [
-                {
-                    "name": idx.get("name", ""),
-                    "column_names": idx.get("column_names", []),
-                    "unique": bool(idx.get("unique", False)),
-                }
-                for idx in indexes
-            ],
-        }
+        schema_info["tables"][table_name] = get_table_schema(table_name, inspector=insp)
 
     return schema_info
 
@@ -147,14 +181,15 @@ def get_schema_summary_text(schema_info: Dict[str, Any]) -> str:
     for table_name, details in schema_info.get("tables", {}).items():
         col_strs = []
         for col in details.get("columns", []):
-            pk_flag = " [PK]" if col["primary_key"] else ""
+            pk_flag = " [PK]" if col.get("primary_key") else ""
             col_strs.append(f"{col['name']} ({col['type']}{pk_flag})")
 
         fk_strs = []
         for fk in details.get("foreign_keys", []):
-            cols = ", ".join(fk["constrained_columns"])
-            ref_cols = ", ".join(fk["referred_columns"])
-            fk_strs.append(f"FOREIGN KEY ({cols}) REFERENCES {fk['referred_table']}({ref_cols})")
+            cols = ", ".join(fk.get("constrained_columns", []))
+            ref_cols = ", ".join(fk.get("referred_columns", []))
+            ref_tbl = fk.get("referred_table", "")
+            fk_strs.append(f"FOREIGN KEY ({cols}) REFERENCES {ref_tbl}({ref_cols})")
 
         table_desc = f"Table `{table_name}`:\n  Columns: {', '.join(col_strs)}"
         if fk_strs:

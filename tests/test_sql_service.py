@@ -13,6 +13,8 @@ class TestSQLService(unittest.TestCase):
     def test_clean_sql_strips_markdown_and_semicolons(self):
         raw_markdown = "```sql\nSELECT * FROM sample_table;\n```"
         self.assertEqual(clean_sql(raw_markdown), "SELECT * FROM sample_table")
+        raw_upper = "```SQL\nSELECT * FROM sample_table;\n```"
+        self.assertEqual(clean_sql(raw_upper), "SELECT * FROM sample_table")
 
     def test_validate_sql_valid_select(self):
         valid_query = "SELECT * FROM sample_table WHERE value > 100"

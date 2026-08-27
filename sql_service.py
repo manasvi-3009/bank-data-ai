@@ -53,8 +53,8 @@ def clean_sql(query: str) -> str:
     if not query:
         return ""
     q = query.strip()
-    # Remove markdown fenced blocks if present
-    if q.startswith("```sql"):
+    # Remove markdown fenced blocks if present (case-insensitive)
+    if q.lower().startswith("```sql"):
         q = q[6:]
     elif q.startswith("```"):
         q = q[3:]

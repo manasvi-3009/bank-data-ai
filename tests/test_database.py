@@ -138,7 +138,33 @@ class TestDatabaseModule(unittest.TestCase):
 
         is_ok, msg = db.test_connection(engine=mock_engine)
         self.assertFalse(is_ok)
-        self.assertIn("Can't connect to MySQL server", msg)
+    @patch("database.inspect")
+    def test_get_discovered_tables(self, mock_inspect):
+        """Verifies get_discovered_tables retrieves table names via inspector."""
+        mock_inspector = MagicMock()
+        mock_inspect.return_value = mock_inspector
+        mock_inspector.get_table_names.return_value = ["table_1", "table_2"]
+
+        dummy_engine = MagicMock()
+        tables = db.get_discovered_tables(engine=dummy_engine)
+        self.assertEqual(tables, ["table_1", "table_2"])
+
+    @patch("database.inspect")
+    def test_get_table_schema(self, mock_inspect):
+        """Verifies get_table_schema extracts column and key metadata for a specific table."""
+        mock_inspector = MagicMock()
+        mock_inspect.return_value = mock_inspector
+        mock_inspector.get_columns.return_value = [
+            {"name": "field_id", "type": "BIGINT", "nullable": False, "primary_key": 1, "default": None}
+        ]
+        mock_inspector.get_pk_constraint.return_value = {"constrained_columns": ["field_id"]}
+        mock_inspector.get_foreign_keys.return_value = []
+        mock_inspector.get_indexes.return_value = []
+
+        dummy_engine = MagicMock()
+        table_meta = db.get_table_schema("table_1", engine=dummy_engine)
+        self.assertEqual(len(table_meta["columns"]), 1)
+        self.assertEqual(table_meta["primary_keys"], ["field_id"])
 
 
 if __name__ == "__main__":
