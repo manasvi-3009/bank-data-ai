@@ -90,6 +90,7 @@ def render_sidebar():
             if is_connected:
                 st.markdown("### Database: **🟢 Connected**")
                 st.caption(f"**Target:** `{config.get_masked_db_url()}`")
+                st.caption("Status: Active & Verified")
             else:
                 st.markdown("### Database: **🔴 Not Connected**")
                 st.error(f"**Status:** {msg}")
