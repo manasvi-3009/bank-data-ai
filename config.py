@@ -40,6 +40,11 @@ class AppConfig:
         return os.getenv("LLM_MODEL", "gpt-4o-mini").strip()
 
     @property
+    def llm_base_url(self) -> str:
+        """Retrieve the LLM Base URL (defaults to standard OpenAI endpoint)."""
+        return os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
+
+    @property
     def is_database_configured(self) -> bool:
         """Check if a valid database URL is supplied."""
         url = self.database_url
