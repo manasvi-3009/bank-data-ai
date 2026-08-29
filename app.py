@@ -7,8 +7,9 @@ Interactive analytical assistant for querying and analyzing the banking_risk_ana
 import streamlit as st
 import pandas as pd
 from config import config
-from database import test_connection, inspect_database_schema, get_discovered_tables
-from sql_service import validate_sql
+from database import test_connection, inspect_database_schema, get_discovered_tables, get_schema_summary_text
+from sql_service import validate_sql, execute_query, SQLValidationError
+from llm_service import llm_service, LLMError
 
 # Page configuration
 st.set_page_config(
@@ -234,48 +235,103 @@ def render_schema_explorer(is_connected: bool):
         st.error(f"Failed to inspect database schema: {str(exc)}")
 
 
-def render_chat_placeholder():
-    """Renders the chat interface placeholder for upcoming NL-to-SQL functionality."""
+def render_chat_interface(is_connected: bool):
+    """Renders the working natural-language-to-SQL chat interface."""
     st.subheader("💬 Ask Questions About Banking Data")
 
-    st.markdown(
-        """
-        <div style="background-color: #F8FAFC; border: 1px dashed #CBD5E1; border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem;">
-            <p style="margin: 0; color: #475569;">
-                <strong>NL-to-SQL Pipeline Ready for Activation:</strong> Once full LLM integration is enabled, you can ask questions in plain English.
-                The system will generate safe, read-only SQL, query <code>banking_risk_analytics</code>, and display interactive charts and tables.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    if not is_connected:
+        st.info("🔒 Connect to the database first to enable natural language querying.")
+        return
 
-    # Example question pills
-    st.markdown("**Suggested Questions (Upcoming):**")
+    if not config.is_llm_configured:
+        st.warning(
+            "🟡 **LLM API Key Missing.** Set `LLM_API_KEY` in your `.env` file to enable "
+            "natural language querying. Falling back to a limited offline mode."
+        )
+
+    # Suggested question buttons (clickable — populate and run the question)
+    st.markdown("**Suggested Questions:**")
+    suggestions = [
+        "What is the total outstanding loan balance grouped by branch?",
+        "Show top 10 accounts with the highest total transaction volume.",
+        "List customers holding credit cards with balances above 80% of credit limit.",
+        "What is the average transaction amount per account type?",
+    ]
     col1, col2 = st.columns(2)
-    with col1:
-        st.info("💡 *'What is the total outstanding loan balance grouped by branch?'*")
-        st.info("💡 *'Show top 10 accounts with the highest total transaction volume this month.'*")
-    with col2:
-        st.info("💡 *'List customers holding credit cards with balances above 80% credit limit.'*")
-        st.info("💡 *'What is the average transaction amount per account type?'*")
+    clicked_question = None
+    for i, suggestion in enumerate(suggestions):
+        target_col = col1 if i % 2 == 0 else col2
+        if target_col.button(f"💡 {suggestion}", key=f"suggestion_{i}", use_container_width=True):
+            clicked_question = suggestion
 
-    # Chat Input Placeholder
-    user_query = st.chat_input(
-        placeholder="Ask a question about customers, accounts, loans, or transactions (NL-to-SQL pipeline placeholder)...",
-        disabled=False,
+    # Free-text input
+    typed_question = st.chat_input(
+        placeholder="Ask a question about customers, accounts, loans, or transactions..."
     )
+
+    user_query = clicked_question or typed_question
 
     if user_query:
         with st.chat_message("user"):
             st.write(user_query)
 
         with st.chat_message("assistant"):
-            st.info(
-                f"Received question: **\"{user_query}\"**\n\n"
-                "⚙️ *NL-to-SQL translation pipeline is staged for the next phase. "
-                "The system will translate this into safe, validated SQL and execute it against `banking_risk_analytics`.*"
-            )
+            # Step 1 — get schema context for the LLM
+            try:
+                schema_info = inspect_database_schema()
+                schema_context = get_schema_summary_text(schema_info)
+            except Exception as exc:
+                st.error(f"Could not read database schema: {exc}")
+                return
+
+            # Step 2 — ask the LLM to generate SQL
+            try:
+                with st.spinner("Translating your question into SQL..."):
+                    sql_query = llm_service.generate_sql(user_query, schema_context)
+            except LLMError as exc:
+                st.error(f"LLM error: {exc}")
+                return
+
+            st.markdown("**Generated SQL:**")
+            st.code(sql_query, language="sql")
+
+            # Step 3 — validate + execute (execute_query already validates internally)
+            try:
+                with st.spinner("Running query..."):
+                    result_df = execute_query(sql_query)
+            except SQLValidationError as exc:
+                st.error(f"🚫 Query blocked for safety: {exc}")
+                return
+            except RuntimeError as exc:
+                st.error(f"Query execution failed: {exc}")
+                return
+
+            if result_df.empty:
+                st.info("The query ran successfully but returned no rows.")
+                return
+
+            st.markdown("**Result:**")
+            st.dataframe(result_df, use_container_width=True, hide_index=True)
+
+            # Auto-chart when the result looks chartable (1 label col + 1 numeric col)
+            if result_df.shape[1] == 2 and result_df.shape[0] > 1:
+                numeric_col = result_df.select_dtypes(include="number").columns
+                if len(numeric_col) == 1:
+                    label_col = [c for c in result_df.columns if c != numeric_col[0]][0]
+                    st.bar_chart(result_df.set_index(label_col)[numeric_col[0]])
+
+            # Step 4 — optional executive summary from the LLM
+            if config.is_llm_configured:
+                try:
+                    with st.spinner("Generating summary..."):
+                        preview = result_df.head(10).to_string(index=False)
+                        summary = llm_service.explain_results(
+                            user_query, sql_query, preview, len(result_df)
+                        )
+                    st.markdown("**Executive Summary:**")
+                    st.info(summary)
+                except LLMError:
+                    pass  # summary is a nice-to-have, don't block on failure
 
 
 def main():
@@ -304,7 +360,7 @@ def main():
         render_schema_explorer(is_connected)
 
     with col_right:
-        render_chat_placeholder()
+        render_chat_interface(is_connected)
 
 
 if __name__ == "__main__":

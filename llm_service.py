@@ -102,6 +102,120 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             raise LLMAPIError(f"Unexpected response format from LLM API: {str(exc)}") from exc
 
 
+class AnthropicProvider(BaseLLMProvider):
+    """
+    HTTP REST provider for Anthropic's native Claude API (api.anthropic.com).
+    Used automatically when LLM_API_KEY starts with 'sk-ant-' or LLM_MODEL contains 'claude'.
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        timeout: int = 30,
+    ):
+        self.api_key = api_key or config.llm_api_key
+        self.model = model or config.llm_model
+        self.timeout = timeout
+        self.url = "https://api.anthropic.com/v1/messages"
+
+        if not self.api_key:
+            raise LLMConfigurationError("LLM API key is not configured.")
+
+    def generate_text(self, system_prompt: str, user_prompt: str, temperature: float = 0.0) -> str:
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model,
+            "max_tokens": 1024,
+            "temperature": temperature,
+            "system": system_prompt,
+            "messages": [
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+
+        try:
+            response = requests.post(self.url, headers=headers, json=payload, timeout=self.timeout)
+        except requests.exceptions.Timeout as exc:
+            raise LLMTimeoutError(f"LLM API request timed out after {self.timeout}s.") from exc
+        except requests.exceptions.RequestException as exc:
+            raise LLMAPIError(f"Network error communicating with LLM service: {str(exc)}") from exc
+
+        if response.status_code == 401:
+            raise LLMAPIError("Authentication failed: Invalid LLM API key. Check LLM_API_KEY in .env.")
+        elif response.status_code == 429:
+            raise LLMAPIError("LLM API rate limit exceeded or quota exhausted. Please retry shortly.")
+        elif response.status_code >= 400:
+            err_text = response.text[:300]
+            raise LLMAPIError(f"LLM API returned error {response.status_code}: {err_text}")
+
+        try:
+            data = response.json()
+            content = data["content"][0]["text"]
+            return content.strip()
+        except (KeyError, IndexError, json.JSONDecodeError) as exc:
+            raise LLMAPIError(f"Unexpected response format from LLM API: {str(exc)}") from exc
+
+
+class GeminiProvider(BaseLLMProvider):
+    """
+    HTTP REST provider for Google's Gemini API (generativelanguage.googleapis.com).
+    Used automatically when LLM_API_KEY starts with 'AIza' or LLM_MODEL contains 'gemini'.
+    This is the FREE-TIER provider (no billing required) for Flash-class models.
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        timeout: int = 30,
+    ):
+        self.api_key = api_key or config.llm_api_key
+        self.model = model or config.llm_model
+        self.timeout = timeout
+
+        if not self.api_key:
+            raise LLMConfigurationError("LLM API key is not configured.")
+
+    def generate_text(self, system_prompt: str, user_prompt: str, temperature: float = 0.0) -> str:
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{self.model}:generateContent?key={self.api_key}"
+        )
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+            "generationConfig": {"temperature": temperature},
+        }
+
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+        except requests.exceptions.Timeout as exc:
+            raise LLMTimeoutError(f"LLM API request timed out after {self.timeout}s.") from exc
+        except requests.exceptions.RequestException as exc:
+            raise LLMAPIError(f"Network error communicating with LLM service: {str(exc)}") from exc
+
+        if response.status_code in (401, 403):
+            raise LLMAPIError("Authentication failed: Invalid LLM API key. Check LLM_API_KEY in .env.")
+        elif response.status_code == 429:
+            raise LLMAPIError("LLM API rate limit exceeded (free tier limit). Wait a moment and retry.")
+        elif response.status_code >= 400:
+            err_text = response.text[:300]
+            raise LLMAPIError(f"LLM API returned error {response.status_code}: {err_text}")
+
+        try:
+            data = response.json()
+            content = data["candidates"][0]["content"]["parts"][0]["text"]
+            return content.strip()
+        except (KeyError, IndexError, json.JSONDecodeError) as exc:
+            raise LLMAPIError(f"Unexpected response format from LLM API: {str(exc)}") from exc
+
+
 class MockLLMProvider(BaseLLMProvider):
     """
     Offline fallback provider used when no API key is configured or during testing.
@@ -176,6 +290,12 @@ class LLMService:
         """Initializes provider based on environment configuration."""
         if config.is_llm_configured:
             try:
+                key = (config.llm_api_key or "")
+                model = (config.llm_model or "").lower()
+                if key.startswith("sk-ant-") or "claude" in model:
+                    return AnthropicProvider()
+                if key.startswith("AIza") or "gemini" in model:
+                    return GeminiProvider()
                 return OpenAICompatibleProvider()
             except Exception:
                 return MockLLMProvider()
