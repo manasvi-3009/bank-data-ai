@@ -1,0 +1,35 @@
+"""
+Enterprise Banking Risk Analytics
+
+Author: Manasvi Vats
+
+Purpose:
+Generate synthetic banking dataset.
+"""
+import pandas as pd
+
+branches = [
+    [101, "Connaught Place", "DEL001", "Delhi", "Delhi", "North", "BKID000101", "Amit Sharma", "9876543210"],
+    [102, "MG Road", "BLR001", "Bengaluru", "Karnataka", "South", "BKID000102", "Priya Singh", "9876543211"],
+    [103, "Hazratganj", "LKO001", "Lucknow", "Uttar Pradesh", "North", "BKID000103", "Rahul Verma", "9876543212"],
+    [104, "Park Street", "KOL001", "Kolkata", "West Bengal", "East", "BKID000104", "Neha Gupta", "9876543213"],
+    [105, "Banjara Hills", "HYD001", "Hyderabad", "Telangana", "South", "BKID000105", "Rohit Mehta", "9876543214"]
+]
+
+columns = [
+    "Branch_ID",
+    "Branch_Name",
+    "Branch_Code",
+    "City",
+    "State",
+    "Region",
+    "IFSC_Code",
+    "Manager_Name",
+    "Contact_Number"
+]
+
+df = pd.DataFrame(branches, columns=columns)
+
+df.to_csv("../branches.csv", index=False)
+
+print("✅ branches.csv generated successfully!")
