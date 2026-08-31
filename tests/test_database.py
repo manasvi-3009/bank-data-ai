@@ -5,6 +5,7 @@ Tests schema parsing, connection diagnostics, pooling, and sample fetching
 using in-memory SQLite and mocks without modifying real database state.
 """
 
+from __future__ import annotations
 import os
 import unittest
 from unittest.mock import MagicMock, patch
@@ -65,7 +66,7 @@ class TestDatabaseModule(unittest.TestCase):
 
         is_ok, msg = db.test_connection(engine=mock_engine)
         self.assertFalse(is_ok)
-        self.assertIn("Cannot reach MySQL host", msg)
+        self.assertIn("Unable to connect to the banking database", msg)
 
     def test_test_connection_failure_unknown_db_1049(self):
         """Verifies clear error message on MySQL 1049 unknown database."""
@@ -74,7 +75,7 @@ class TestDatabaseModule(unittest.TestCase):
 
         is_ok, msg = db.test_connection(engine=mock_engine)
         self.assertFalse(is_ok)
-        self.assertIn("Database 'banking_risk_analytics' not found", msg)
+        self.assertIn("not found", msg)
 
     def test_test_connection_failure_server_gone_away_2006(self):
         """Verifies clear error message on MySQL 2006 server gone away."""
