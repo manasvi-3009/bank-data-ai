@@ -1,15 +1,23 @@
 """
-load_csv_data.py — loads CSV files from ./data/ into the matching MySQL tables.
+load_csv_data.py — Optional Development Data-Loading Utility for Bank Data AI.
 
-- Tries several encodings automatically.
-- Only inserts CSV columns that actually exist in the target table.
-- Skips a table if it already has rows (to avoid duplicate-key errors on re-runs).
-- Auto-generates a value for any required (NOT NULL, no default) column that's
-  missing from the CSV, derived from the table's primary key column.
+Utility to seed the local MySQL `banking_risk_analytics` database from CSV files in ./data/
+during initial development setup.
 
-Run with: python load_csv_data.py
+Features:
+- Dynamically discovers tables via SQLAlchemy inspector.
+- Automatically tests multiple text encodings.
+- Only maps CSV columns that exist in the target database table.
+- Skips tables that already contain rows to prevent duplicate-key errors.
+- Never runs automatically in the main query runtime path.
+
+Usage:
+    python load_csv_data.py
 """
+
+from __future__ import annotations
 import os
+from typing import Optional, Tuple
 import pandas as pd
 from sqlalchemy import inspect, text
 from database import get_db_engine, get_discovered_tables
@@ -18,8 +26,9 @@ DATA_FOLDER = "data"
 ENCODINGS_TO_TRY = ["utf-8", "utf-8-sig", "utf-16", "latin1", "cp1252"]
 
 
-def read_csv_robust(filepath):
-    last_error = None
+def read_csv_robust(filepath: str) -> Tuple[pd.DataFrame, str]:
+    """Attempts to read a CSV file using several common text encodings."""
+    last_error: Optional[Exception] = None
     for enc in ENCODINGS_TO_TRY:
         try:
             df = pd.read_csv(filepath, encoding=enc)
@@ -31,13 +40,15 @@ def read_csv_robust(filepath):
     raise ValueError(f"Could not parse file with any known encoding. Last error: {last_error}")
 
 
-def get_table_row_count(engine, table_name):
+def get_table_row_count(engine, table_name: str) -> int:
+    """Returns the current row count for a table."""
     with engine.connect() as conn:
         result = conn.execute(text(f"SELECT COUNT(*) FROM `{table_name}`"))
-        return result.scalar()
+        return int(result.scalar() or 0)
 
 
 def main():
+    """Main data loading routine."""
     if not os.path.isdir(DATA_FOLDER):
         print(f"Folder '{DATA_FOLDER}' not found. Create it and put your CSV files inside.")
         return
@@ -45,14 +56,14 @@ def main():
     engine = get_db_engine()
     inspector = inspect(engine)
     existing_tables = set(get_discovered_tables(engine))
-    print(f"Tables found in database: {sorted(existing_tables)}\n")
+    print(f"Tables discovered in database: {sorted(existing_tables)}\n")
 
     csv_files = [f for f in os.listdir(DATA_FOLDER) if f.lower().endswith(".csv")]
     if not csv_files:
         print(f"No CSV files found in '{DATA_FOLDER}'.")
         return
 
-    for filename in csv_files:
+    for filename in sorted(csv_files):
         table_name = os.path.splitext(filename)[0].strip().lower().replace(" ", "_")
         filepath = os.path.join(DATA_FOLDER, filename)
 
@@ -85,8 +96,7 @@ def main():
 
         df_filtered = df[matching_columns].copy()
 
-        # Auto-fill required (NOT NULL, no default) columns missing from the CSV,
-        # derived from the table's primary key column so values stay unique.
+        # Auto-fill required (NOT NULL, no default) columns missing from the CSV
         pk_constraint = inspector.get_pk_constraint(matched_table)
         pk_cols = pk_constraint.get("constrained_columns", [])
         pk_col = pk_cols[0] if pk_cols else None
@@ -94,7 +104,12 @@ def main():
 
         for col in table_col_info:
             col_name = col["name"]
-            if col_name in missing_columns and not col.get("nullable", True) and col.get("default") is None and not col.get("autoincrement", False):
+            if (
+                col_name in missing_columns
+                and not col.get("nullable", True)
+                and col.get("default") is None
+                and not col.get("autoincrement", False)
+            ):
                 if pk_col and pk_col in df.columns:
                     prefix = "".join([w[0] for w in col_name.split("_")]).upper()
                     df_filtered[col_name] = df[pk_col].apply(lambda v: f"{prefix}{v}")
@@ -113,7 +128,7 @@ def main():
         except Exception as exc:
             print(f"❌ FAILED loading '{filename}' into '{matched_table}': {exc}")
 
-    print("\nDone. Refresh your Streamlit app to see updated row counts.")
+    print("\nData loading pass completed.")
 
 
 if __name__ == "__main__":
