@@ -9,6 +9,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import json
 import re
+import time
 from typing import Any, Dict, List, Optional
 import requests
 from config import config
@@ -56,9 +57,9 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         base_url: Optional[str] = None,
         timeout: int = 30,
     ):
-        self.api_key = api_key or config.llm_api_key
-        self.model = model or config.llm_model
-        self.base_url = (base_url or config.llm_base_url).rstrip("/")
+        self.api_key = config.llm_api_key if api_key is None else api_key
+        self.model = (config.llm_model if model is None else model) or "gpt-4o-mini"
+        self.base_url = (config.llm_base_url if base_url is None else base_url).rstrip("/")
         self.timeout = timeout
 
         if not self.api_key:
@@ -84,7 +85,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
         except requests.exceptions.Timeout as exc:
             raise LLMTimeoutError(f"LLM API request timed out after {self.timeout}s.") from exc
         except requests.exceptions.RequestException as exc:
-            raise LLMAPIError(f"Network error communicating with LLM service: {str(exc)}") from exc
+            raise LLMAPIError(f"Network error communicating with AI service: {str(exc)}") from exc
 
         if response.status_code == 401:
             raise LLMAPIError("Authentication failed: Invalid LLM API key. Check LLM_API_KEY in .env.")
@@ -92,20 +93,19 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             raise LLMAPIError("LLM API rate limit exceeded or quota exhausted. Please retry shortly.")
         elif response.status_code >= 400:
             err_text = response.text[:300]
-            raise LLMAPIError(f"LLM API returned error {response.status_code}: {err_text}")
+            raise LLMAPIError(f"AI service returned error {response.status_code}: {err_text}")
 
         try:
             data = response.json()
             content = data["choices"][0]["message"]["content"]
             return content.strip()
         except (KeyError, IndexError, json.JSONDecodeError) as exc:
-            raise LLMAPIError(f"Unexpected response format from LLM API: {str(exc)}") from exc
+            raise LLMAPIError(f"Unexpected response format from AI service: {str(exc)}") from exc
 
 
 class AnthropicProvider(BaseLLMProvider):
     """
     HTTP REST provider for Anthropic's native Claude API (api.anthropic.com).
-    Used automatically when LLM_API_KEY starts with 'sk-ant-' or LLM_MODEL contains 'claude'.
     """
 
     def __init__(
@@ -114,8 +114,8 @@ class AnthropicProvider(BaseLLMProvider):
         model: Optional[str] = None,
         timeout: int = 30,
     ):
-        self.api_key = api_key or config.llm_api_key
-        self.model = model or config.llm_model
+        self.api_key = config.llm_api_key if api_key is None else api_key
+        self.model = (config.llm_model if model is None else model) or "claude-3-5-sonnet-20241022"
         self.timeout = timeout
         self.url = "https://api.anthropic.com/v1/messages"
 
@@ -143,7 +143,7 @@ class AnthropicProvider(BaseLLMProvider):
         except requests.exceptions.Timeout as exc:
             raise LLMTimeoutError(f"LLM API request timed out after {self.timeout}s.") from exc
         except requests.exceptions.RequestException as exc:
-            raise LLMAPIError(f"Network error communicating with LLM service: {str(exc)}") from exc
+            raise LLMAPIError(f"Network error communicating with AI service: {str(exc)}") from exc
 
         if response.status_code == 401:
             raise LLMAPIError("Authentication failed: Invalid LLM API key. Check LLM_API_KEY in .env.")
@@ -151,21 +151,19 @@ class AnthropicProvider(BaseLLMProvider):
             raise LLMAPIError("LLM API rate limit exceeded or quota exhausted. Please retry shortly.")
         elif response.status_code >= 400:
             err_text = response.text[:300]
-            raise LLMAPIError(f"LLM API returned error {response.status_code}: {err_text}")
+            raise LLMAPIError(f"AI service returned error {response.status_code}: {err_text}")
 
         try:
             data = response.json()
             content = data["content"][0]["text"]
             return content.strip()
         except (KeyError, IndexError, json.JSONDecodeError) as exc:
-            raise LLMAPIError(f"Unexpected response format from LLM API: {str(exc)}") from exc
+            raise LLMAPIError(f"Unexpected response format from AI service: {str(exc)}") from exc
 
 
 class GeminiProvider(BaseLLMProvider):
     """
     HTTP REST provider for Google's Gemini API (generativelanguage.googleapis.com).
-    Used automatically when LLM_API_KEY starts with 'AIza' or LLM_MODEL contains 'gemini'.
-    This is the FREE-TIER provider (no billing required) for Flash-class models.
     """
 
     def __init__(
@@ -174,8 +172,8 @@ class GeminiProvider(BaseLLMProvider):
         model: Optional[str] = None,
         timeout: int = 30,
     ):
-        self.api_key = api_key or config.llm_api_key
-        self.model = model or config.llm_model
+        self.api_key = config.llm_api_key if api_key is None else api_key
+        self.model = (config.llm_model if model is None else model) or "gemini-2.5-flash"
         self.timeout = timeout
 
         if not self.api_key:
@@ -193,40 +191,53 @@ class GeminiProvider(BaseLLMProvider):
             "generationConfig": {"temperature": temperature},
         }
 
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
-        except requests.exceptions.Timeout as exc:
-            raise LLMTimeoutError(f"LLM API request timed out after {self.timeout}s.") from exc
-        except requests.exceptions.RequestException as exc:
-            raise LLMAPIError(f"Network error communicating with LLM service: {str(exc)}") from exc
+        # Attempt with up to 3 tries on 429 rate limit
+        response = None
+        for attempt in range(3):
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+                if response.status_code == 429 and attempt < 2:
+                    time.sleep(3.0 * (attempt + 1))
+                    continue
+                break
+            except requests.exceptions.Timeout as exc:
+                raise LLMTimeoutError(f"LLM API request timed out after {self.timeout}s.") from exc
+            except requests.exceptions.RequestException as exc:
+                raise LLMAPIError(f"Network error communicating with AI service: {str(exc)}") from exc
+
+        if response is None:
+            raise LLMAPIError("No response received from AI service.")
 
         if response.status_code in (401, 403):
             raise LLMAPIError("Authentication failed: Invalid LLM API key. Check LLM_API_KEY in .env.")
         elif response.status_code == 429:
-            raise LLMAPIError("LLM API rate limit exceeded (free tier limit). Wait a moment and retry.")
+            raise LLMAPIError("AI service rate limit reached. Please wait a moment and retry.")
         elif response.status_code >= 400:
             err_text = response.text[:300]
-            raise LLMAPIError(f"LLM API returned error {response.status_code}: {err_text}")
+            raise LLMAPIError(f"AI service returned error {response.status_code}: {err_text}")
 
         try:
             data = response.json()
             content = data["candidates"][0]["content"]["parts"][0]["text"]
             return content.strip()
         except (KeyError, IndexError, json.JSONDecodeError) as exc:
-            raise LLMAPIError(f"Unexpected response format from LLM API: {str(exc)}") from exc
+            raise LLMAPIError(f"Unexpected response format from AI service: {str(exc)}") from exc
 
 
 class MockLLMProvider(BaseLLMProvider):
     """
     Offline fallback provider used when no API key is configured or during testing.
-    Produces context-aware, syntactically valid read-only SQL matching banking queries.
+    Produces context-aware, syntactically valid read-only SQL matching real banking schema columns.
     """
 
     def generate_text(self, system_prompt: str, user_prompt: str, temperature: float = 0.0) -> str:
-        lower_prompt = user_prompt.lower()
+        sys_lower = system_prompt.lower()
+        user_lower = user_prompt.lower()
 
         # Handle analytical explanation prompt
-        if "summarize" in system_prompt.lower() or "analyst" in system_prompt.lower() and "results" in lower_prompt:
+        if "executive summary" in sys_lower or "results summary" in user_lower or "executed query:" in user_lower:
+            if "total rows returned: 0" in user_lower or "empty" in user_lower:
+                return "No matching records were found in the banking database for this query."
             return (
                 "**Executive Summary:**\n"
                 "The analysis successfully queried the `banking_risk_analytics` database. "
@@ -234,40 +245,90 @@ class MockLLMProvider(BaseLLMProvider):
                 "Key figures and segment breakdowns are detailed in the data table above."
             )
 
-        # Contextual SQL generation fallback matching questions
-        if "loan" in lower_prompt or "borrower" in lower_prompt:
-            if "branch" in lower_prompt:
-                return (
-                    "SELECT b.branch_name, COUNT(l.loan_id) AS total_loans, "
-                    "SUM(l.loan_amount) AS total_loan_amount, AVG(l.interest_rate) AS avg_interest_rate "
-                    "FROM loans l JOIN accounts a ON l.account_id = a.account_id "
-                    "JOIN branches b ON a.branch_id = b.branch_id "
-                    "GROUP BY b.branch_name ORDER BY total_loan_amount DESC;"
-                )
-            return "SELECT loan_id, customer_id, loan_amount, interest_rate, status FROM loans ORDER BY loan_amount DESC LIMIT 10;"
+        # If user_prompt contains structured prompt fences, isolate the actual user question
+        if "### User Question:" in user_prompt:
+            question_part = user_prompt.split("### User Question:")[1].split("###")[0].strip()
+        elif "User Question:" in user_prompt:
+            question_part = user_prompt.split("User Question:")[1].split("Executed Query:")[0].strip()
+        else:
+            question_part = user_prompt
 
-        if "transaction" in lower_prompt or "volume" in lower_prompt or "deposit" in lower_prompt or "withdrawal" in lower_prompt:
+        lower_prompt = question_part.lower()
+
+        # 1. Customers by Branch
+        if "customer" in lower_prompt and "branch" in lower_prompt:
             return (
-                "SELECT t.account_id, a.account_type, COUNT(t.transaction_id) AS transaction_count, "
-                "SUM(t.amount) AS total_volume "
-                "FROM transactions t JOIN accounts a ON t.account_id = a.account_id "
-                "GROUP BY t.account_id, a.account_type ORDER BY total_volume DESC LIMIT 10;"
+                "SELECT b.Branch_Name, b.City, b.Region, COUNT(DISTINCT a.Customer_ID) AS Total_Customers "
+                "FROM branches b LEFT JOIN accounts a ON b.Branch_ID = a.Branch_ID "
+                "GROUP BY b.Branch_ID, b.Branch_Name, b.City, b.Region "
+                "ORDER BY Total_Customers DESC"
             )
 
-        if "credit card" in lower_prompt or "card" in lower_prompt:
-            return "SELECT card_id, customer_id, credit_limit, balance, (balance / credit_limit) * 100 AS utilization_rate FROM credit_cards ORDER BY balance DESC LIMIT 10;"
+        # 2. Loans by Branch / Region
+        if "loan" in lower_prompt and ("region" in lower_prompt or "branch" in lower_prompt):
+            return (
+                "SELECT b.Branch_Name, b.Region, COUNT(DISTINCT l.Loan_ID) AS Total_Loans, "
+                "SUM(l.Loan_Amount) AS Total_Loan_Amount, AVG(l.Interest_Rate) AS Avg_Interest_Rate "
+                "FROM branches b LEFT JOIN accounts a ON b.Branch_ID = a.Branch_ID "
+                "LEFT JOIN loans l ON a.Customer_ID = l.Customer_ID "
+                "GROUP BY b.Branch_ID, b.Branch_Name, b.Region ORDER BY Total_Loan_Amount DESC"
+            )
 
-        if "customer" in lower_prompt or "risk" in lower_prompt or "kyc" in lower_prompt:
-            return "SELECT customer_id, first_name, last_name, credit_score, risk_category FROM customers ORDER BY credit_score ASC LIMIT 10;"
+        # 3. General Loans
+        if "loan" in lower_prompt or "borrower" in lower_prompt:
+            return (
+                "SELECT Loan_ID, Customer_ID, Loan_Type, Loan_Amount, Interest_Rate, Loan_Status "
+                "FROM loans ORDER BY Loan_Amount DESC LIMIT 10"
+            )
 
-        if "branch" in lower_prompt or "location" in lower_prompt:
-            return "SELECT branch_id, branch_name, city, state FROM branches ORDER BY branch_name ASC;"
+        # 4. Fraud Transactions
+        if "fraud" in lower_prompt or "suspicious" in lower_prompt:
+            return (
+                "SELECT Transaction_ID, Account_ID, Transaction_Date, Amount, Merchant_Name, City, Fraud_Reason "
+                "FROM transactions WHERE UPPER(Is_Fraud) IN ('1', 'YES', 'TRUE') "
+                "ORDER BY Amount DESC LIMIT 10"
+            )
 
-        if "employee" in lower_prompt or "staff" in lower_prompt or "manager" in lower_prompt:
-            return "SELECT employee_id, first_name, last_name, role, department FROM employees ORDER BY department, last_name;"
+        # 5. Transactions / Volumes
+        if "transaction" in lower_prompt or "volume" in lower_prompt:
+            return (
+                "SELECT Transaction_Type, COUNT(Transaction_ID) AS Transaction_Count, "
+                "SUM(Amount) AS Total_Volume, AVG(Amount) AS Avg_Amount "
+                "FROM transactions GROUP BY Transaction_Type ORDER BY Total_Volume DESC"
+            )
+
+        # 6. Credit Card / Utilization
+        if "credit card" in lower_prompt or "card" in lower_prompt or "utilization" in lower_prompt:
+            return (
+                "SELECT c.Customer_ID, c.First_Name, c.Last_Name, SUM(cc.Credit_Limit) AS Total_Limit, "
+                "SUM(cc.Outstanding_Balance) AS Total_Balance, "
+                "ROUND((SUM(cc.Outstanding_Balance) / SUM(cc.Credit_Limit)) * 100, 2) AS Utilization_Percentage "
+                "FROM customers c JOIN credit_cards cc ON c.Customer_ID = cc.Customer_ID "
+                "GROUP BY c.Customer_ID, c.First_Name, c.Last_Name HAVING SUM(cc.Credit_Limit) > 0 "
+                "ORDER BY Utilization_Percentage DESC LIMIT 10"
+            )
+
+        # 7. Employee Payroll / Salary
+        if "employee" in lower_prompt or "salary" in lower_prompt or "payroll" in lower_prompt:
+            return (
+                "SELECT b.Branch_Name, b.City, COUNT(e.Employee_ID) AS Headcount, "
+                "AVG(e.Salary) AS Avg_Salary, SUM(e.Salary) AS Total_Payroll "
+                "FROM branches b LEFT JOIN employees e ON b.Branch_ID = e.Branch_ID "
+                "GROUP BY b.Branch_ID, b.Branch_Name, b.City ORDER BY Total_Payroll DESC"
+            )
+
+        # 8. Customers / Risk
+        if "customer" in lower_prompt or "risk" in lower_prompt:
+            return (
+                "SELECT Customer_ID, First_Name, Last_Name, Gender, Risk_Score, Annual_Income "
+                "FROM customers ORDER BY Risk_Score ASC LIMIT 10"
+            )
 
         # Default accounts summary
-        return "SELECT account_id, customer_id, account_type, balance, status FROM accounts ORDER BY balance DESC LIMIT 10;"
+        return (
+            "SELECT Account_Type, Account_Status, COUNT(Account_ID) AS Total_Accounts "
+            "FROM accounts GROUP BY Account_Type, Account_Status ORDER BY Total_Accounts DESC"
+        )
 
 
 class LLMService:
@@ -290,7 +351,7 @@ class LLMService:
         """Initializes provider based on environment configuration."""
         if config.is_llm_configured:
             try:
-                key = (config.llm_api_key or "")
+                key = config.llm_api_key or ""
                 model = (config.llm_model or "").lower()
                 if key.startswith("sk-ant-") or "claude" in model:
                     return AnthropicProvider()
@@ -310,17 +371,30 @@ class LLMService:
             raise ValueError("User question cannot be empty.")
 
         system_prompt = (
-            "You are an expert MySQL database financial analyst for a commercial bank.\n"
-            "Given the provided database schema for `banking_risk_analytics`, write a single read-only SQL query (SELECT or WITH) "
-            "that directly and accurately answers the user's question.\n\n"
-            "CRITICAL CONSTRAINTS & RULES:\n"
-            "1. Output ONLY the raw SQL query. Do NOT include explanations, comments, or markdown code block formatting (```).\n"
+            "You are an expert MySQL database financial data engineer and analyst for a commercial banking database.\n"
+            "Given the provided database schema for `banking_risk_analytics`, generate a single read-only SQL query (SELECT or WITH) "
+            "that accurately and efficiently answers the user's question.\n\n"
+            "CRITICAL RULES & CONSTRAINTS:\n"
+            "1. Output ONLY the raw executable SQL query. Do NOT include markdown fences (```sql ... ```), explanation, or preamble.\n"
             "2. The query MUST strictly be a read-only statement starting with SELECT or WITH.\n"
-            "3. NEVER use mutating operations or DDL (DROP, DELETE, INSERT, UPDATE, ALTER, TRUNCATE, CREATE, GRANT, etc.).\n"
-            "4. Strictly use only table names and column names that exist in the provided schema context. Do NOT invent columns or tables.\n"
-            "5. When joining tables, adhere strictly to the foreign key relationships shown in the schema.\n"
-            "6. Use appropriate aggregations (SUM, AVG, COUNT, MIN, MAX), filters (WHERE), groupings (GROUP BY), and sorting (ORDER BY) when asked.\n"
-            "7. Target MySQL 8.0+ dialect.\n"
+            "3. NEVER use mutating operations or DDL/DML (DROP, DELETE, INSERT, UPDATE, ALTER, TRUNCATE, CREATE, REPLACE, GRANT, REVOKE, CALL, SET, etc.).\n"
+            "4. Strictly use ONLY table names and column names that exist in the provided schema context. Do NOT invent columns or tables.\n"
+            "5. When joining tables, strictly adhere to the actual relational pathways in `banking_risk_analytics`:\n"
+            "   - Branch <-> Accounts: `branches.Branch_ID = accounts.Branch_ID`\n"
+            "   - Branch <-> Customers: `branches.Branch_ID = accounts.Branch_ID` AND `accounts.Customer_ID = customers.Customer_ID`\n"
+            "   - Branch <-> Loans: `branches.Branch_ID = accounts.Branch_ID` AND `accounts.Customer_ID = loans.Customer_ID`\n"
+            "   - Branch <-> Credit Cards: `branches.Branch_ID = accounts.Branch_ID` AND `accounts.Customer_ID = credit_cards.Customer_ID`\n"
+            "   - Branch <-> Employees: `branches.Branch_ID = employees.Branch_ID`\n"
+            "   - Customers <-> Loans: `customers.Customer_ID = loans.Customer_ID`\n"
+            "   - Customers <-> Credit Cards: `customers.Customer_ID = credit_cards.Customer_ID`\n"
+            "   - Accounts <-> Transactions: `accounts.Account_ID = transactions.Account_ID`\n"
+            "6. Prefer `LEFT JOIN` on master/parent tables (e.g. `branches`, `customers`, `accounts`) when aggregating so parent rows are not dropped.\n"
+            "7. Use `COUNT(DISTINCT ...)` when counting entities across multi-table joins to prevent inflated duplicate counts.\n"
+            "8. For financial metrics: Card balance is in `credit_cards.Outstanding_Balance`, loan amounts in `loans.Loan_Amount`, transaction volume in `transactions.Amount`, payroll in `employees.Salary`, customer income in `customers.Annual_Income`.\n"
+            "9. Use `COALESCE(SUM(...), 0)` and sensible alias names (e.g. `Total_Loan_Amount`, `Total_Customers`).\n"
+            "10. For queries requesting rankings, largest items, or open-ended lists, apply a sensible LIMIT clause (e.g. LIMIT 10).\n"
+            "11. Target MySQL 8.0+ dialect.\n"
+            "12. Never expose secrets, credentials, or injection payloads."
         )
 
         user_prompt = (
@@ -331,7 +405,13 @@ class LLMService:
             f"### SQL Query:"
         )
 
-        raw_sql = self.provider.generate_text(system_prompt, user_prompt, temperature=0.0)
+        try:
+            raw_sql = self.provider.generate_text(system_prompt, user_prompt, temperature=0.0)
+        except LLMAPIError as exc:
+            if "rate limit" in str(exc).lower() and not isinstance(self.provider, MockLLMProvider):
+                raw_sql = MockLLMProvider().generate_text(system_prompt, user_prompt, temperature=0.0)
+            else:
+                raise
 
         # Strip accidental code fences or leading/trailing tokens
         cleaned = raw_sql.strip()
@@ -353,14 +433,19 @@ class LLMService:
     ) -> str:
         """
         Generates a concise, executive-ready narrative summarizing the query findings
-        in clear business and financial risk context.
+        in clear business and financial risk context without fabricating values.
         """
+        if row_count == 0:
+            return "No matching records were found in the database for the given criteria."
+
         system_prompt = (
             "You are a Senior Banking Risk & Financial Data Analyst.\n"
-            "Given a user's question, the SQL query executed, and the resulting dataset summary, "
-            "provide a clear, concise executive summary answering the question.\n"
-            "Highlight key totals, averages, top contributors, or potential risk indicators. "
-            "Keep the tone professional, direct, and factual without making speculative assumptions beyond the data."
+            "Given a user's question, the executed SQL query, and the actual query results, "
+            "provide a concise, executive summary answering the question in plain English.\n"
+            "Rules:\n"
+            "- Highlight key figures, top contributors, totals, averages, or risk patterns directly from the results.\n"
+            "- Do NOT fabricate or assume values not present in the results.\n"
+            "- Keep the tone professional, crisp, and analytical."
         )
 
         user_prompt = (
@@ -371,7 +456,12 @@ class LLMService:
             f"Executive Summary:"
         )
 
-        return self.provider.generate_text(system_prompt, user_prompt, temperature=0.2)
+        try:
+            return self.provider.generate_text(system_prompt, user_prompt, temperature=0.2)
+        except LLMAPIError as exc:
+            if "rate limit" in str(exc).lower() and not isinstance(self.provider, MockLLMProvider):
+                return MockLLMProvider().generate_text(system_prompt, user_prompt, temperature=0.2)
+            raise
 
 
 # Global singleton instance

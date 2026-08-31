@@ -2,9 +2,10 @@
 Configuration module for Bank Data AI.
 
 Loads and validates environment settings for the MySQL database connection
-and LLM services without exposing secrets.
+and LLM services without exposing secrets or plaintext credentials.
 """
 
+from __future__ import annotations
 import os
 from pathlib import Path
 from urllib.parse import urlparse
@@ -22,7 +23,7 @@ except ImportError:
 
 
 class AppConfig:
-    """Application configuration container."""
+    """Application configuration container with safe credential handling."""
 
     @property
     def database_url(self) -> str:
@@ -48,12 +49,32 @@ class AppConfig:
     def is_database_configured(self) -> bool:
         """Check if a valid database URL is supplied."""
         url = self.database_url
-        return bool(url and (url.startswith("mysql://") or url.startswith("mysql+pymysql://") or url.startswith("sqlite://")))
+        return bool(
+            url
+            and (
+                url.startswith("mysql://")
+                or url.startswith("mysql+pymysql://")
+                or url.startswith("sqlite://")
+            )
+        )
 
     @property
     def is_llm_configured(self) -> bool:
         """Check if an LLM API key is provided."""
         return bool(self.llm_api_key)
+
+    @property
+    def database_name(self) -> str:
+        """Extracts the database name from the configured DATABASE_URL or defaults to banking_risk_analytics."""
+        raw_url = self.database_url
+        if not raw_url:
+            return "banking_risk_analytics"
+        try:
+            parsed = urlparse(raw_url)
+            path = parsed.path.lstrip("/")
+            return path if path else "banking_risk_analytics"
+        except Exception:
+            return "banking_risk_analytics"
 
     def get_masked_db_url(self) -> str:
         """
@@ -66,7 +87,6 @@ class AppConfig:
 
         try:
             parsed = urlparse(raw_url)
-            # Mask user:password if present using rsplit to handle '@' safely
             netloc = parsed.netloc
             if "@" in netloc:
                 auth_part, host_part = netloc.rsplit("@", 1)
@@ -80,7 +100,11 @@ class AppConfig:
             return "mysql://******"
 
     def __repr__(self) -> str:
-        return f"<AppConfig database_configured={self.is_database_configured} llm_configured={self.is_llm_configured} model={self.llm_model}>"
+        return (
+            f"<AppConfig database_configured={self.is_database_configured} "
+            f"database_name='{self.database_name}' "
+            f"llm_configured={self.is_llm_configured} model='{self.llm_model}'>"
+        )
 
 
 # Global singleton instance

@@ -107,32 +107,33 @@ def test_connection(engine: Optional[Engine] = None) -> Tuple[bool, str]:
         elif "2003" in err_msg or "getaddrinfo failed" in err_msg or "Connection refused" in err_msg:
             return (
                 False,
-                "Cannot reach MySQL host. Ensure your host is set to 'localhost' or '127.0.0.1' "
-                "(e.g. mysql+pymysql://root:password@localhost:3306/banking_risk_analytics) "
-                "and that MySQL Server is running on port 3306."
+                "Unable to connect to the banking database. Check MySQL Server and configuration "
+                "(ensure host is 'localhost' or '127.0.0.1' on port 3306)."
             )
         elif "1049" in err_msg or "Unknown database" in err_msg:
-            return False, "Database 'banking_risk_analytics' not found on this MySQL instance."
+            return False, f"Database '{config.database_name}' not found on this MySQL instance."
         elif "2006" in err_msg or "MySQL server has gone away" in err_msg:
             return False, "MySQL server has gone away. Connection timed out or server restarted."
         elif "timed out" in err_msg.lower() or "timeout" in err_msg.lower():
             return False, "Database connection timed out. Please check network and server load."
-        return False, f"Connection error: {err_msg}"
+        return False, f"Unable to connect to the banking database: {err_msg}"
 
 
 def get_connection_diagnostics(engine: Optional[Engine] = None) -> Dict[str, Any]:
     """
     Retrieves rich diagnostic metadata about the current database connection,
-    including latency, dialect, masked URL, and pool status.
+    including latency, dialect, masked URL, database name, and pool status.
     """
     masked_url = config.get_masked_db_url()
     diagnostics: Dict[str, Any] = {
         "is_configured": config.is_database_configured,
+        "database_name": config.database_name,
         "masked_url": masked_url,
         "is_connected": False,
         "status_message": "",
         "latency_ms": None,
         "dialect": None,
+        "table_count": 0,
     }
 
     if not config.is_database_configured and engine is None:
@@ -150,6 +151,13 @@ def get_connection_diagnostics(engine: Optional[Engine] = None) -> Dict[str, Any
         diagnostics["is_connected"] = True
         diagnostics["latency_ms"] = elapsed_ms
         diagnostics["status_message"] = f"Connected ({elapsed_ms}ms latency)."
+
+        try:
+            inspector = inspect(eng)
+            tables = inspector.get_table_names() or []
+            diagnostics["table_count"] = len(tables)
+        except Exception:
+            diagnostics["table_count"] = 0
     except Exception as exc:
         is_ok, msg = test_connection(engine=eng if "eng" in locals() else None)
         diagnostics["is_connected"] = False
@@ -282,8 +290,8 @@ def inspect_database_schema(engine: Optional[Engine] = None) -> Dict[str, Any]:
 
 def get_schema_summary_text(schema_info: Dict[str, Any]) -> str:
     """
-    Formats the dynamic schema dictionary into a concise, structured representation
-    suitable for LLM prompt context injection.
+    Formats the dynamic schema dictionary into a structured representation
+    with relational join pathways suitable for LLM prompt context injection.
     """
     lines: List[str] = []
     tables = schema_info.get("tables", {})
@@ -309,10 +317,28 @@ def get_schema_summary_text(schema_info: Dict[str, Any]) -> str:
 
         table_desc = f"Table `{table_name}`:\n  Columns: {', '.join(col_strs)}"
         if fk_strs:
-            table_desc += f"\n  Relationships: {'; '.join(fk_strs)}"
+            table_desc += f"\n  Explicit FKs: {'; '.join(fk_strs)}"
         lines.append(table_desc)
 
-    return "\n\n".join(lines)
+    # Add real-world relational join pathways to guide query construction
+    relational_notes = (
+        "### Key Relational Join Pathways in `banking_risk_analytics`:\n"
+        "- Branch <-> Accounts: `branches.Branch_ID = accounts.Branch_ID`\n"
+        "- Branch <-> Customers: `branches.Branch_ID = accounts.Branch_ID` AND `accounts.Customer_ID = customers.Customer_ID`\n"
+        "- Branch <-> Loans: `branches.Branch_ID = accounts.Branch_ID` AND `accounts.Customer_ID = loans.Customer_ID`\n"
+        "- Branch <-> Credit Cards: `branches.Branch_ID = accounts.Branch_ID` AND `accounts.Customer_ID = credit_cards.Customer_ID`\n"
+        "- Branch <-> Employees: `branches.Branch_ID = employees.Branch_ID`\n"
+        "- Accounts <-> Transactions: `accounts.Account_ID = transactions.Account_ID`\n"
+        "- Customers <-> Loans: `customers.Customer_ID = loans.Customer_ID`\n"
+        "- Customers <-> Credit Cards: `customers.Customer_ID = credit_cards.Customer_ID`\n\n"
+        "### Analytical Query Guidelines:\n"
+        "- Prefer `LEFT JOIN` for parent/dimension entities (e.g., `branches b LEFT JOIN accounts a ON ...`) to prevent dropping valid parent rows.\n"
+        "- When calculating customer branch metrics, link through `accounts.Branch_ID`.\n"
+        "- For financial balances/metrics: card balances are in `credit_cards.Outstanding_Balance`, loan amounts in `loans.Loan_Amount`, transaction volumes in `transactions.Amount`, payroll in `employees.Salary`, and income in `customers.Annual_Income`.\n"
+        "- Use `COALESCE(SUM(...), 0)` and `COUNT(DISTINCT ...)` where appropriate."
+    )
+
+    return "\n\n".join(lines) + "\n\n" + relational_notes
 
 
 def get_table_sample(
