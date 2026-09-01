@@ -30,6 +30,7 @@ from sql_service import (
     SQLExecutionError,
 )
 from llm_service import llm_service, LLMError, LLMConfigurationError
+from visualization import render_visualization
 
 # -----------------------------------------------------------------------------
 # Streamlit Page Setup & Custom Modern Financial CSS
@@ -125,6 +126,7 @@ st.markdown(
         background: #E2E8F0;
         color: #475569;
         margin-right: 6px;
+        margin-bottom: 6px;
     }
     </style>
     """,
@@ -133,90 +135,26 @@ st.markdown(
 
 
 # -----------------------------------------------------------------------------
-# Session State Initialization
+# Session State Initialization & Schema Caching
 # -----------------------------------------------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
-# -----------------------------------------------------------------------------
-# Intelligent Visualization Heuristic Engine
-# -----------------------------------------------------------------------------
-def render_intelligent_visualization(df: pd.DataFrame) -> None:
-    """
-    Analyzes DataFrame structure and automatically renders the most appropriate chart:
-    - 1 Row with 1-4 numeric values -> Metric KPIs
-    - 1 Categorical column + 1 Numeric column -> Bar Chart
-    - 1 Temporal/Date column + 1 Numeric column -> Line/Area Chart
-    - 2 Numeric columns (multi-row) -> Scatter Chart
-    - Non-visualizable or complex tables -> Tabular display only
-    """
-    if df is None or df.empty:
-        return
+def get_cached_schema() -> Tuple[Dict[str, Any], str]:
+    """Retrieves or caches dynamic schema metadata for session efficiency."""
+    if "cached_schema_data" not in st.session_state or "cached_schema_context" not in st.session_state:
+        schema_data = inspect_database_schema()
+        schema_context = get_schema_summary_text(schema_data)
+        st.session_state.cached_schema_data = schema_data
+        st.session_state.cached_schema_context = schema_context
+    return st.session_state.cached_schema_data, st.session_state.cached_schema_context
 
-    num_rows, num_cols = df.shape
 
-    # 1. Metric Card case: Single row with small set of numeric metrics
-    if num_rows == 1:
-        numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-        valid_numeric_cols = [c for c in numeric_cols if df[c].notna().any()]
-        if 1 <= len(valid_numeric_cols) <= 4:
-            st.markdown("**📈 Key Metric Overview**")
-            cols = st.columns(len(valid_numeric_cols))
-            for i, col_name in enumerate(valid_numeric_cols):
-                val = df[col_name].iloc[0]
-                if pd.notna(val):
-                    formatted_val = (
-                        f"{val:,.2f}"
-                        if isinstance(val, (float, int)) and not float(val).is_integer()
-                        else f"{val:,}" if isinstance(val, int) else str(val)
-                    )
-                else:
-                    formatted_val = "N/A"
-                label = col_name.replace("_", " ").title()
-                cols[i].metric(label=label, value=formatted_val)
-            return
-
-    # Identify column data types
-    date_cols = [
-        c
-        for c in df.columns
-        if "date" in c.lower()
-        or "time" in c.lower()
-        or pd.api.types.is_datetime64_any_dtype(df[c])
-    ]
-    numeric_cols = [c for c in df.select_dtypes(include=["number"]).columns.tolist() if df[c].notna().any()]
-    categorical_cols = [c for c in df.columns if c not in numeric_cols and c not in date_cols]
-
-    # 2. Time-series / Date Trend case: Date column + Numeric column
-    if date_cols and numeric_cols and num_rows > 1:
-        date_col = date_cols[0]
-        num_col = numeric_cols[0]
-        chart_df = df[[date_col, num_col]].dropna().sort_values(by=date_col)
-        if not chart_df.empty:
-            st.markdown(f"**📈 Trend Analysis ({num_col.replace('_', ' ')} over {date_col.replace('_', ' ')})**")
-            st.line_chart(chart_df.set_index(date_col))
-            return
-
-    # 3. Categorical Comparison: 1 Categorical + 1 Numeric column
-    if categorical_cols and numeric_cols and 1 < num_rows <= 30:
-        cat_col = categorical_cols[0]
-        num_col = numeric_cols[0]
-        chart_df = df[[cat_col, num_col]].dropna().sort_values(by=num_col, ascending=False).set_index(cat_col)
-        if not chart_df.empty:
-            st.markdown(f"**📊 Category Breakdown ({num_col.replace('_', ' ')} by {cat_col.replace('_', ' ')})**")
-            st.bar_chart(chart_df)
-            return
-
-    # 4. Scatter Plot: 2 Numeric columns with multiple rows
-    if len(numeric_cols) >= 2 and num_rows > 5 and not categorical_cols:
-        x_col = numeric_cols[0]
-        y_col = numeric_cols[1]
-        chart_df = df[[x_col, y_col]].dropna()
-        if len(chart_df) > 3:
-            st.markdown(f"**🔍 Correlation Plot ({y_col.replace('_', ' ')} vs {x_col.replace('_', ' ')})**")
-            st.scatter_chart(chart_df, x=x_col, y=y_col)
-            return
+def clear_schema_cache() -> None:
+    """Invalidates session schema cache."""
+    st.session_state.pop("cached_schema_data", None)
+    st.session_state.pop("cached_schema_context", None)
 
 
 # -----------------------------------------------------------------------------
@@ -259,14 +197,14 @@ def render_sidebar() -> Tuple[bool, Dict[str, Any]]:
         st.markdown("**AI / LLM Engine:**")
         if config.is_llm_configured:
             st.markdown(
-                f'<span class="status-badge status-badge-blue">🤖 Active</span>',
+                '<span class="status-badge status-badge-blue">🤖 Active</span>',
                 unsafe_allow_html=True,
             )
             st.caption(f"**Provider:** `{type(llm_service.provider).__name__}`")
             st.caption(f"**Model:** `{config.llm_model}`")
         else:
             st.markdown(
-                f'<span class="status-badge status-badge-amber">🟡 Offline Mock Mode</span>',
+                '<span class="status-badge status-badge-amber">🟡 Offline Mock Mode</span>',
                 unsafe_allow_html=True,
             )
             st.caption("Configured with schema-grounded fallback responses.")
@@ -300,6 +238,7 @@ def render_sidebar() -> Tuple[bool, Dict[str, Any]]:
 
         # Quick Actions
         if st.button("🔄 Refresh System Status", use_container_width=True):
+            clear_schema_cache()
             st.rerun()
 
         if st.session_state.messages:
@@ -327,7 +266,7 @@ def render_schema_explorer(is_connected: bool) -> None:
 
         try:
             with st.spinner("Dynamically inspecting database schema..."):
-                schema_data = inspect_database_schema()
+                schema_data, _ = get_cached_schema()
 
             table_names = schema_data.get("table_names", [])
             if not table_names:
@@ -432,8 +371,7 @@ def process_user_question(question: str) -> None:
     with status_placeholder.container():
         with st.spinner("🔍 Inspecting database schema dynamically..."):
             try:
-                schema_data = inspect_database_schema()
-                schema_context = get_schema_summary_text(schema_data)
+                _, schema_context = get_cached_schema()
             except Exception as exc:
                 st.session_state.messages.append({
                     "question": question,
@@ -521,7 +459,11 @@ def process_user_question(question: str) -> None:
     with status_placeholder.container():
         with st.spinner("📝 Preparing executive analytics summary..."):
             try:
-                preview_text = df.head(10).to_string(index=False) if df is not None and not df.empty else "Empty Result Set (0 rows)"
+                preview_text = (
+                    df.head(10).to_string(index=False)
+                    if df is not None and not df.empty
+                    else "Empty Result Set (0 rows)"
+                )
                 summary_text = llm_service.explain_results(
                     question,
                     generated_sql,
@@ -585,7 +527,7 @@ def main():
 
     st.markdown("### 💬 Analytical Conversation")
 
-    # Display Chat History
+    # Display Chat History with Clean Visual Hierarchy
     for msg in st.session_state.messages:
         with st.chat_message("user"):
             st.write(msg["question"])
@@ -598,7 +540,7 @@ def main():
                         st.code(msg["sql"], language="sql")
                 continue
 
-            # Natural-Language Executive Summary
+            # 1. Natural-Language Executive Summary / Finding
             summary = msg.get("summary", "")
             if summary:
                 st.markdown(
@@ -611,24 +553,24 @@ def main():
                     unsafe_allow_html=True,
                 )
 
-            # Metadata Badge & Generated SQL
+            # 2. Generated Read-Only SQL (Expandable Section)
+            with st.expander("🔍 View Generated Read-Only SQL", expanded=False):
+                st.code(msg["sql"], language="sql")
+
+            # 3. Formatted Result Table with Metadata Badge
             latency = msg.get("latency_ms", 0.0)
             rows = msg.get("row_count", 0)
             st.markdown(
                 f'<span class="metric-pill">⏱️ {latency} ms</span>'
-                f'<span class="metric-pill">📊 {rows} rows</span>',
+                f'<span class="metric-pill">📊 {rows} rows returned</span>',
                 unsafe_allow_html=True,
             )
 
-            with st.expander("🔍 View Generated Read-Only SQL", expanded=False):
-                st.code(msg["sql"], language="sql")
-
-            # Result Data Table
             df = msg.get("data")
             if df is not None and not df.empty:
                 st.dataframe(df, use_container_width=True, hide_index=True)
-                # Automatic Visualization
-                render_intelligent_visualization(df)
+                # 4. Intelligent Visualization (if meaningful)
+                render_visualization(df)
             elif df is not None and df.empty:
                 st.info("ℹ️ No matching records were found.")
 
