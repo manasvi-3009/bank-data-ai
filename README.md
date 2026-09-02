@@ -32,6 +32,53 @@ Exploring enterprise relational databases typically requires deep SQL proficienc
 
 ---
 
+
+
+---
+
+## How It Works
+
+Bank Data AI follows this pipeline:
+
+**Natural Language Question**
+→ **Schema Context**
+→ **LLM SQL Generation**
+→ **SQL Safety Validation**
+→ **MySQL Execution**
+→ **Result Analysis**
+→ **Visualization**
+
+## Example Queries
+
+- Which branch has the highest number of customers?
+- What is the average account balance?
+- Show total loan amount by region.
+- Which customers have high credit utilization?
+- What are the largest transactions?
+- Which employees have the highest attrition?
+
+## Security
+
+The application uses a read-only SQL execution model.
+
+The system rejects mutation operations such as:
+
+`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `CREATE`
+
+Multi-statement SQL is also rejected.
+
+Database credentials and API keys are stored in environment variables and are never committed to GitHub.
+
+## Testing
+
+Run the test suite with:
+
+```bash
+python -m pytest -q
+
+
+
+
 ## 4. Architecture Pipeline
 
 ```
