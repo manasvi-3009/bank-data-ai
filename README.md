@@ -288,5 +288,3 @@ python load_csv_data.py
 - **Role-Based Access Control (RBAC)**: Support multiple analyst roles with column-level masking for sensitive PII (e.g. customer phone/email).
 - **Audit Logging & Analytics**: Store full query logs, user intent classifications, and query execution times in an administrative audit ledger.
 - **Multi-Database Support**: Extend dialect abstractions to PostgreSQL, Snowflake, and BigQuery.
-
-https://github.com/manasvi-3009/bank-data-ai
