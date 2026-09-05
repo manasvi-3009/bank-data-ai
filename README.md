@@ -63,7 +63,7 @@ The application connects to the real MySQL database:
 
 and dynamically discovers its schema before generating analytical queries.
 
-The high-level experience is:
+The high-level experience is:-
 
 ```text
 User Question
