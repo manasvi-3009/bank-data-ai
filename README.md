@@ -1,6 +1,6 @@
 # 🏦 Bank Data AI
 
-> **Ask questions. Get answers. Query your banking data in natural language.**
+> **Ask questions. Get answers. Query your banking data in natural language.....**
 
 **Bank Data AI** is an AI-powered analytics assistant that allows users to interact with a real relational banking database using natural language instead of manually writing SQL.
 
