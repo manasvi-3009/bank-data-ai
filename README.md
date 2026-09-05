@@ -154,10 +154,8 @@ The application operates directly on the real **`banking_risk_analytics`** MySQL
 - Git
 
 ### 1. Clone the Repository
-```bash
-git clone <repository-url> bank-data-ai
+git clone https://github.com/manasvi-3009/bank-data-ai.git
 cd bank-data-ai
-```
 
 ### 2. Create and Activate Virtual Environment
 ```bash
@@ -290,3 +288,5 @@ python load_csv_data.py
 - **Role-Based Access Control (RBAC)**: Support multiple analyst roles with column-level masking for sensitive PII (e.g. customer phone/email).
 - **Audit Logging & Analytics**: Store full query logs, user intent classifications, and query execution times in an administrative audit ledger.
 - **Multi-Database Support**: Extend dialect abstractions to PostgreSQL, Snowflake, and BigQuery.
+
+https://github.com/manasvi-3009/bank-data-ai
