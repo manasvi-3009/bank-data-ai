@@ -49,7 +49,7 @@ into a safe analytical SQL query, executes it against the banking database, and 
 - [Repository](#-repository)
 - [Author](#-author)
 
-----
+---
 
 # 🔎 Overview
 
