@@ -6,7 +6,7 @@
 
 The application combines **LLM-powered SQL generation, dynamic database schema discovery, SQL safety validation, MySQL execution, result analysis, and automatic visualization** into a single Streamlit application.
 
-Instead of requiring a user to know SQL syntax, the system translates questions such as:
+Instead of requiring a user to know SQL syntax, the system translates questions such
 
 > "Which branch has the highest number of customers?"
 
