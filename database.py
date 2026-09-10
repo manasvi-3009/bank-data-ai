@@ -320,22 +320,26 @@ def get_schema_summary_text(schema_info: Dict[str, Any]) -> str:
             table_desc += f"\n  Explicit FKs: {'; '.join(fk_strs)}"
         lines.append(table_desc)
 
-    # Add real-world relational join pathways to guide query construction
+    # Add definitive, real-world relational join pathways to guide query construction
     relational_notes = (
-        "### Key Relational Join Pathways in `banking_risk_analytics`:\n"
-        "- Branch <-> Accounts: `branches.Branch_ID = accounts.Branch_ID`\n"
-        "- Branch <-> Customers: `branches.Branch_ID = accounts.Branch_ID` AND `accounts.Customer_ID = customers.Customer_ID`\n"
-        "- Branch <-> Loans: `branches.Branch_ID = accounts.Branch_ID` AND `accounts.Customer_ID = loans.Customer_ID`\n"
-        "- Branch <-> Credit Cards: `branches.Branch_ID = accounts.Branch_ID` AND `accounts.Customer_ID = credit_cards.Customer_ID`\n"
-        "- Branch <-> Employees: `branches.Branch_ID = employees.Branch_ID`\n"
-        "- Accounts <-> Transactions: `accounts.Account_ID = transactions.Account_ID`\n"
-        "- Customers <-> Loans: `customers.Customer_ID = loans.Customer_ID`\n"
-        "- Customers <-> Credit Cards: `customers.Customer_ID = credit_cards.Customer_ID`\n\n"
-        "### Analytical Query Guidelines:\n"
-        "- Prefer `LEFT JOIN` for parent/dimension entities (e.g., `branches b LEFT JOIN accounts a ON ...`) to prevent dropping valid parent rows.\n"
-        "- When calculating customer branch metrics, link through `accounts.Branch_ID`.\n"
-        "- For financial balances/metrics: card balances are in `credit_cards.Outstanding_Balance`, loan amounts in `loans.Loan_Amount`, transaction volumes in `transactions.Amount`, payroll in `employees.Salary`, and income in `customers.Annual_Income`.\n"
-        "- Use `COALESCE(SUM(...), 0)` and `COUNT(DISTINCT ...)` where appropriate."
+        "### DEFINITIVE RELATIONAL JOIN PATHWAYS FOR `banking_risk_analytics`:\n"
+        "1. Branch <-> Accounts: `branches.Branch_ID = accounts.Branch_ID` (100% populated in accounts)\n"
+        "2. Branch <-> Customers: `branches b JOIN accounts a ON b.Branch_ID = a.Branch_ID JOIN customers c ON a.Customer_ID = c.Customer_ID`\n"
+        "   - CRITICAL: `customers.Branch_ID` is NULL for all customer records. NEVER join `customers` directly to `branches` on `customers.Branch_ID`. ALWAYS link through `accounts`!\n"
+        "3. Branch <-> Loans: `branches b JOIN accounts a ON b.Branch_ID = a.Branch_ID JOIN loans l ON a.Customer_ID = l.Customer_ID`\n"
+        "   - Use `SUM(l.Loan_Amount)` for total loan balance / loan exposure by branch.\n"
+        "4. Branch <-> Credit Cards: `branches b JOIN accounts a ON b.Branch_ID = a.Branch_ID JOIN credit_cards cc ON a.Customer_ID = cc.Customer_ID`\n"
+        "   - Use `SUM(cc.Outstanding_Balance)` for total credit card balance by branch.\n"
+        "5. Branch <-> Employees: `branches.Branch_ID = employees.Branch_ID` (Direct FK)\n"
+        "   - Use `SUM(e.Salary)` for payroll by branch.\n"
+        "6. Accounts <-> Transactions: `accounts.Account_ID = transactions.Account_ID` (Direct link)\n"
+        "   - Use `SUM(t.Amount)` for transaction volume by account or branch.\n"
+        "7. Customers <-> Loans: `customers.Customer_ID = loans.Customer_ID` (Direct link)\n"
+        "8. Customers <-> Credit Cards: `customers.Customer_ID = credit_cards.Customer_ID` (Direct link)\n\n"
+        "### ANALYTICAL JOIN GUIDELINES:\n"
+        "- When aggregating master entities (e.g. branches), prefer `LEFT JOIN` (e.g. `branches b LEFT JOIN accounts a ON b.Branch_ID = a.Branch_ID LEFT JOIN loans l ON a.Customer_ID = l.Customer_ID`).\n"
+        "- Use `COUNT(DISTINCT l.Loan_ID)` or `COUNT(DISTINCT a.Customer_ID)` to prevent duplicate count inflation in multi-table joins.\n"
+        "- Metric columns: Loan balance = `loans.Loan_Amount`, Credit card balance = `credit_cards.Outstanding_Balance`, Transaction volume = `transactions.Amount`, Salary = `employees.Salary`, Customer income = `customers.Annual_Income`."
     )
 
     return "\n\n".join(lines) + "\n\n" + relational_notes

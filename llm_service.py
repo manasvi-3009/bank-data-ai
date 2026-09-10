@@ -265,13 +265,13 @@ class MockLLMProvider(BaseLLMProvider):
             )
 
         # 2. Loans by Branch / Region
-        if "loan" in lower_prompt and ("region" in lower_prompt or "branch" in lower_prompt):
+        if "loan" in lower_prompt and ("region" in lower_prompt or "branch" in lower_prompt or "balance" in lower_prompt or "outstanding" in lower_prompt):
             return (
-                "SELECT b.Branch_Name, b.Region, COUNT(DISTINCT l.Loan_ID) AS Total_Loans, "
+                "SELECT b.Branch_Name, b.City, b.Region, COUNT(DISTINCT l.Loan_ID) AS Total_Loans, "
                 "SUM(l.Loan_Amount) AS Total_Loan_Amount, AVG(l.Interest_Rate) AS Avg_Interest_Rate "
                 "FROM branches b LEFT JOIN accounts a ON b.Branch_ID = a.Branch_ID "
                 "LEFT JOIN loans l ON a.Customer_ID = l.Customer_ID "
-                "GROUP BY b.Branch_ID, b.Branch_Name, b.Region ORDER BY Total_Loan_Amount DESC"
+                "GROUP BY b.Branch_ID, b.Branch_Name, b.City, b.Region ORDER BY Total_Loan_Amount DESC"
             )
 
         # 3. General Loans
@@ -379,18 +379,19 @@ class LLMService:
             "2. The query MUST strictly be a read-only statement starting with SELECT or WITH.\n"
             "3. NEVER use mutating operations or DDL/DML (DROP, DELETE, INSERT, UPDATE, ALTER, TRUNCATE, CREATE, REPLACE, GRANT, REVOKE, CALL, SET, etc.).\n"
             "4. Strictly use ONLY table names and column names that exist in the provided schema context. Do NOT invent columns or tables.\n"
-            "5. When joining tables, strictly adhere to the actual relational pathways in `banking_risk_analytics`:\n"
-            "   - Branch <-> Accounts: `branches.Branch_ID = accounts.Branch_ID`\n"
-            "   - Branch <-> Customers: `branches.Branch_ID = accounts.Branch_ID` AND `accounts.Customer_ID = customers.Customer_ID`\n"
-            "   - Branch <-> Loans: `branches.Branch_ID = accounts.Branch_ID` AND `accounts.Customer_ID = loans.Customer_ID`\n"
-            "   - Branch <-> Credit Cards: `branches.Branch_ID = accounts.Branch_ID` AND `accounts.Customer_ID = credit_cards.Customer_ID`\n"
-            "   - Branch <-> Employees: `branches.Branch_ID = employees.Branch_ID`\n"
-            "   - Customers <-> Loans: `customers.Customer_ID = loans.Customer_ID`\n"
-            "   - Customers <-> Credit Cards: `customers.Customer_ID = credit_cards.Customer_ID`\n"
-            "   - Accounts <-> Transactions: `accounts.Account_ID = transactions.Account_ID`\n"
+            "5. RELATIONAL INTEGRITY & JOIN RULES (CRITICAL):\n"
+            "   - Strictly join tables ONLY through their real foreign key pathways as detailed in the schema context.\n"
+            "   - `accounts.Branch_ID` links accounts to `branches.Branch_ID` (100% populated).\n"
+            "   - `customers.Branch_ID` is NULL for all customers. NEVER join `customers` directly to `branches` on `customers.Branch_ID`. ALWAYS link through `accounts`!\n"
+            "   - To query branches with customers, loans, or credit cards, join `branches` -> `accounts` -> `customers` / `loans` / `credit_cards`:\n"
+            "     * Branch to Loans: `branches b JOIN accounts a ON b.Branch_ID = a.Branch_ID JOIN loans l ON a.Customer_ID = l.Customer_ID`\n"
+            "     * Branch to Customers: `branches b JOIN accounts a ON b.Branch_ID = a.Branch_ID JOIN customers c ON a.Customer_ID = c.Customer_ID`\n"
+            "     * Branch to Credit Cards: `branches b JOIN accounts a ON b.Branch_ID = a.Branch_ID JOIN credit_cards cc ON a.Customer_ID = cc.Customer_ID`\n"
+            "     * Branch to Employees: `branches b JOIN employees e ON b.Branch_ID = e.Branch_ID`\n"
+            "     * Accounts to Transactions: `accounts a JOIN transactions t ON a.Account_ID = t.Account_ID`\n"
             "6. Prefer `LEFT JOIN` on master/parent tables (e.g. `branches`, `customers`, `accounts`) when aggregating so parent rows are not dropped.\n"
-            "7. Use `COUNT(DISTINCT ...)` when counting entities across multi-table joins to prevent inflated duplicate counts.\n"
-            "8. For financial metrics: Card balance is in `credit_cards.Outstanding_Balance`, loan amounts in `loans.Loan_Amount`, transaction volume in `transactions.Amount`, payroll in `employees.Salary`, customer income in `customers.Annual_Income`.\n"
+            "7. Use `COUNT(DISTINCT ...)` when counting entities across multi-table joins to prevent duplicate counts.\n"
+            "8. For financial metrics: Loan balance / total loans is in `loans.Loan_Amount`, card balance in `credit_cards.Outstanding_Balance`, transaction volume in `transactions.Amount`, payroll in `employees.Salary`, customer income in `customers.Annual_Income`.\n"
             "9. Use `COALESCE(SUM(...), 0)` and sensible alias names (e.g. `Total_Loan_Amount`, `Total_Customers`).\n"
             "10. For queries requesting rankings, largest items, or open-ended lists, apply a sensible LIMIT clause (e.g. LIMIT 10).\n"
             "11. Target MySQL 8.0+ dialect.\n"
@@ -407,8 +408,8 @@ class LLMService:
 
         try:
             raw_sql = self.provider.generate_text(system_prompt, user_prompt, temperature=0.0)
-        except LLMAPIError as exc:
-            if "rate limit" in str(exc).lower() and not isinstance(self.provider, MockLLMProvider):
+        except (LLMAPIError, LLMTimeoutError) as exc:
+            if not isinstance(self.provider, MockLLMProvider):
                 raw_sql = MockLLMProvider().generate_text(system_prompt, user_prompt, temperature=0.0)
             else:
                 raise
@@ -458,8 +459,8 @@ class LLMService:
 
         try:
             return self.provider.generate_text(system_prompt, user_prompt, temperature=0.2)
-        except LLMAPIError as exc:
-            if "rate limit" in str(exc).lower() and not isinstance(self.provider, MockLLMProvider):
+        except (LLMAPIError, LLMTimeoutError) as exc:
+            if not isinstance(self.provider, MockLLMProvider):
                 return MockLLMProvider().generate_text(system_prompt, user_prompt, temperature=0.2)
             raise
 
