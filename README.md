@@ -3,7 +3,7 @@
 > **Natural-Language Analytics for a Relational Banking Database**  
 > An enterprise-grade AI assistant that translates plain English financial questions into secure, read-only MySQL queries, executes them against a relational banking database, and delivers structured tabular data, automatic charts, and executive insights.
 
----
+-----
 
 ## 📌 Overview
 
