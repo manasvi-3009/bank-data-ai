@@ -19,8 +19,7 @@ The system dynamically inspects the database schema, constructs dialect-accurate
 
 > **Note on Data**: This is a portfolio demonstration project operating on a **synthetic banking dataset** designed to mirror realistic commercial banking operations, risk profiles, and transaction volumes.
 
----
-
+----
 ## 🛠️ Tech Stack
 
 - **Application & UI**: Python 3.11+, Streamlit (Modern Financial Theme)
