@@ -29,7 +29,7 @@ The system dynamically inspects the database schema, constructs dialect-accurate
 - **AI / LLM Engine**: Google Gemini API (`gemini-2.5-flash`), OpenAI API, Anthropic Claude API, and Schema-Grounded Offline Fallback Provider
 - **Testing & Quality Assurance**: Pytest, Unittest (53 tests, 100% pass rate)
 
----
+------
 
 ## 🔄 How the NL-to-SQL Pipeline Works
 
