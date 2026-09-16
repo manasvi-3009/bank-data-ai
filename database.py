@@ -339,7 +339,8 @@ def get_schema_summary_text(schema_info: Dict[str, Any]) -> str:
         "### ANALYTICAL JOIN GUIDELINES:\n"
         "- When aggregating master entities (e.g. branches), prefer `LEFT JOIN` (e.g. `branches b LEFT JOIN accounts a ON b.Branch_ID = a.Branch_ID LEFT JOIN loans l ON a.Customer_ID = l.Customer_ID`).\n"
         "- Use `COUNT(DISTINCT l.Loan_ID)` or `COUNT(DISTINCT a.Customer_ID)` to prevent duplicate count inflation in multi-table joins.\n"
-        "- Metric columns: Loan balance = `loans.Loan_Amount`, Credit card balance = `credit_cards.Outstanding_Balance`, Transaction volume = `transactions.Amount`, Salary = `employees.Salary`, Customer income = `customers.Annual_Income`."
+        "- Metric columns: Loan balance = `loans.Loan_Amount`, Credit card balance = `credit_cards.Outstanding_Balance`, Transaction volume = `transactions.Amount`, Salary = `employees.Salary`, Customer income = `customers.Annual_Income`.\n"
+        "- Column values & filters: In `transactions`, `Is_Fraud` is stored as 'Yes' or 'No' (always filter with `UPPER(Is_Fraud) IN ('YES', '1', 'TRUE')` or `Is_Fraud = 'Yes'`). Loan statuses are 'Active', 'Default', 'Closed'. Account statuses are 'Active', 'Inactive'."
     )
 
     return "\n\n".join(lines) + "\n\n" + relational_notes

@@ -392,10 +392,11 @@ class LLMService:
             "6. Prefer `LEFT JOIN` on master/parent tables (e.g. `branches`, `customers`, `accounts`) when aggregating so parent rows are not dropped.\n"
             "7. Use `COUNT(DISTINCT ...)` when counting entities across multi-table joins to prevent duplicate counts.\n"
             "8. For financial metrics: Loan balance / total loans is in `loans.Loan_Amount`, card balance in `credit_cards.Outstanding_Balance`, transaction volume in `transactions.Amount`, payroll in `employees.Salary`, customer income in `customers.Annual_Income`.\n"
-            "9. Use `COALESCE(SUM(...), 0)` and sensible alias names (e.g. `Total_Loan_Amount`, `Total_Customers`).\n"
-            "10. For queries requesting rankings, largest items, or open-ended lists, apply a sensible LIMIT clause (e.g. LIMIT 10).\n"
-            "11. Target MySQL 8.0+ dialect.\n"
-            "12. Never expose secrets, credentials, or injection payloads."
+            "9. For boolean/categorical filters: In `transactions`, `Is_Fraud` is stored as 'Yes' or 'No' (filter with `UPPER(Is_Fraud) IN ('YES', '1', 'TRUE')` or `Is_Fraud = 'Yes'`). Loan statuses are 'Active', 'Default', 'Closed'. Account statuses are 'Active', 'Inactive'.\n"
+            "10. Use `COALESCE(SUM(...), 0)` and sensible alias names (e.g. `Total_Loan_Amount`, `Total_Customers`).\n"
+            "11. For queries requesting rankings, largest items, or open-ended lists, apply a sensible LIMIT clause (e.g. LIMIT 10).\n"
+            "12. Target MySQL 8.0+ dialect.\n"
+            "13. Never expose secrets, credentials, or injection payloads."
         )
 
         user_prompt = (
