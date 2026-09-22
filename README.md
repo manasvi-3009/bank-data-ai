@@ -3,7 +3,7 @@
 > **Natural-Language-to-SQL Analytics Assistant for Commercial Banking Data**  
 > Transform plain English financial inquiries into secure, read-only MySQL queries with dynamic schema discovery, automated security guardrails, interactive charts, and AI-generated executive summaries.
 
----
+----
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.30+-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://streamlit.io/)
