@@ -23,7 +23,7 @@ Non-technical financial analysts, risk officers, and branch managers can ask com
 
 ---
 
-## 🖼️ Dashboard Preview Has
+## 🖼️ Dashboard Preview 
 
 ![Schema Discovery](screenshots/overview.png)
 
