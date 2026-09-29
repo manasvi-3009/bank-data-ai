@@ -1,4 +1,4 @@
-# 🏦 Bank Data AI
+# 🏦 Bank Data AI view
 
 > **Natural-Language-to-SQL Analytics Assistant for Commercial Banking Data**  
 > Transform plain English financial inquiries into secure, read-only MySQL queries with dynamic schema discovery, automated security guardrails, interactive charts, and AI-generated executive summaries.
