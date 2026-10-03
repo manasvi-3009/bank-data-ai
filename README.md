@@ -12,7 +12,7 @@
 
 ---
 
-## 📌 What This Does to this
+## 📌 What This Does
 
 **Bank Data AI** is an intelligent conversational analytics platform designed for exploring relational banking databases without requiring manual SQL authoring. 
 
