@@ -68,7 +68,7 @@ The platform uses a stepped, deterministic execution pipeline to guarantee safet
 
 ---
 
-## 🛠️ Tech Stack Has
+## 🛠️ Tech Stack 
 
 | Layer | Technology | Description |
 | :--- | :--- | :--- |
