@@ -6,10 +6,12 @@ and dynamic runtime schema discovery for the banking_risk_analytics database.
 """
 
 from __future__ import annotations
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.engine.url import make_url
 from config import config
 
 # Global cache for the engine instance
@@ -36,32 +38,85 @@ class SchemaInspectionError(DatabaseError):
     pass
 
 
+def normalize_db_url(raw_url: str) -> Tuple[str, Dict[str, Any]]:
+    """
+    Normalizes database URL and configures connection arguments for PyMySQL / TLS.
+    - Converts `mysql://` to `mysql+pymysql://` for SQLAlchemy compatibility.
+    - Strips unsupported query parameters (e.g., `ssl-mode=REQUIRED`) so PyMySQL
+      does not raise an unexpected argument error.
+    - Automatically enables secure TLS/SSL connection for remote MySQL servers (e.g. Aiven)
+      or when `ssl-mode` is requested.
+    """
+    if not raw_url:
+        return "", {}
+
+    url_str = raw_url.strip()
+    if url_str.startswith("mysql://"):
+        url_str = "mysql+pymysql://" + url_str[len("mysql://"):]
+
+    connect_args: Dict[str, Any] = {}
+
+    if url_str.startswith("sqlite"):
+        connect_args["check_same_thread"] = False
+        return url_str, connect_args
+
+    try:
+        url_obj = make_url(url_str)
+    except Exception:
+        return url_str, connect_args
+
+    query_dict = dict(url_obj.query)
+
+    # Clean out ssl-mode / ssl_mode from query string so PyMySQL dialect doesn't choke
+    ssl_mode_val = query_dict.pop("ssl-mode", None) or query_dict.pop("ssl_mode", None)
+    ssl_ca_val = query_dict.pop("ssl_ca", None) or query_dict.pop("ssl-ca", None)
+
+    cleaned_url = url_obj._replace(query=query_dict).render_as_string(hide_password=False)
+
+    host = url_obj.host or ""
+    is_remote = host.lower() not in ("localhost", "127.0.0.1", "::1", "")
+
+    connect_args["connect_timeout"] = 10
+
+    # Configure SSL for remote hosts (e.g., Aiven, cloud MySQL) or when requested
+    if is_remote or ssl_mode_val or "aivencloud" in host.lower():
+        ssl_dict: Dict[str, Any] = {}
+        if ssl_mode_val:
+            ssl_dict["ssl_mode"] = ssl_mode_val
+        connect_args["ssl"] = ssl_dict
+
+    if ssl_ca_val:
+        connect_args["ssl_ca"] = ssl_ca_val
+
+    return cleaned_url, connect_args
+
+
 def get_db_engine(db_url: Optional[str] = None, force_new: bool = False) -> Engine:
     """
     Creates or returns a cached SQLAlchemy Engine instance.
     Uses connection pooling, pre-ping, and connection timeouts to ensure stability.
     """
     global _engine
-    target_url = db_url or config.database_url
+    target_raw = db_url or config.database_url
 
-    if not target_url:
+    if not target_raw:
         raise DatabaseConfigurationError(
-            "DATABASE_URL is not configured. Please set it in your .env file "
+            "DATABASE_URL is not configured. Please set it in your environment or .env file "
             "(e.g., mysql+pymysql://user:pass@localhost:3306/banking_risk_analytics)."
         )
 
+    target_url, extra_connect_args = normalize_db_url(target_raw)
+
     if _engine is None or force_new or (db_url and db_url != str(_engine.url)):
-        connect_args: Dict[str, Any] = {}
+        connect_args: Dict[str, Any] = dict(extra_connect_args)
 
         if target_url.startswith("sqlite"):
-            connect_args["check_same_thread"] = False
             _engine = create_engine(
                 target_url,
                 connect_args=connect_args,
             )
         else:
             # MySQL / PyMySQL specific connection arguments
-            connect_args["connect_timeout"] = 5
             _engine = create_engine(
                 target_url,
                 pool_pre_ping=True,
@@ -90,8 +145,20 @@ def test_connection(engine: Optional[Engine] = None) -> Tuple[bool, str]:
     Performs a lightweight connection health check (SELECT 1).
     Returns (is_successful, user_friendly_status_message).
     """
+    host = "localhost"
+    port = 3306
+    db_name = config.database_name
+    is_local = True
+
     try:
         eng = engine or get_db_engine()
+        url_obj = getattr(eng, "url", None)
+        if url_obj is not None and hasattr(url_obj, "host") and isinstance(url_obj.host, str):
+            host = url_obj.host
+            port = url_obj.port or 3306
+            db_name = url_obj.database or config.database_name
+            is_local = host.lower() in ("localhost", "127.0.0.1", "::1")
+
         with eng.connect() as conn:
             conn.execute(text("SELECT 1"))
         return True, "Database connection established successfully."
@@ -101,22 +168,52 @@ def test_connection(engine: Optional[Engine] = None) -> Tuple[bool, str]:
         return False, str(val_err)
     except Exception as exc:
         err_msg = str(exc)
-        # Provide user-friendly troubleshooting context without leaking secrets
-        if "1045" in err_msg or "Access denied" in err_msg:
-            return False, "Access denied. Please check your MySQL username and password in .env."
-        elif "2003" in err_msg or "getaddrinfo failed" in err_msg or "Connection refused" in err_msg:
+        # 1. Unknown MySQL server host (Error 2005 / DNS resolution failure)
+        if "2005" in err_msg or ("unknown" in err_msg.lower() and "server host" in err_msg.lower()):
+            if is_local:
+                return (
+                    False,
+                    "Unable to connect to the banking database: Unknown MySQL server host. "
+                    "Ensure host is 'localhost' or '127.0.0.1'."
+                )
             return (
                 False,
-                "Unable to connect to the banking database. Check MySQL Server and configuration "
-                "(ensure host is 'localhost' or '127.0.0.1' on port 3306)."
+                f"Unable to connect to the banking database: Unknown MySQL server host '{host}' (Error 2005). "
+                "DNS lookup failed. Please verify the hostname in your database provider dashboard "
+                "(e.g., Aiven Console), ensure the service is active/running, and verify the URI has no typos or protocol prefixes."
             )
-        elif "1049" in err_msg or "Unknown database" in err_msg:
-            return False, f"Database '{config.database_name}' not found on this MySQL instance."
-        elif "2006" in err_msg or "MySQL server has gone away" in err_msg:
+        # 2. Connection refused / Host unreachable (Error 2003 / getaddrinfo)
+        elif "2003" in err_msg or "getaddrinfo failed" in err_msg.lower() or "connection refused" in err_msg.lower():
+            if is_local:
+                return (
+                    False,
+                    f"Unable to connect to the banking database. Check MySQL Server and configuration "
+                    f"(ensure host is 'localhost' or '127.0.0.1' on port {port})."
+                )
+            return (
+                False,
+                f"Unable to connect to the banking database. Unable to reach MySQL server at {host}:{port} (Error 2003). "
+                "Verify the remote host, port, and network firewall / IP access list."
+            )
+        # 3. Access denied / Auth failure (Error 1045)
+        elif "1045" in err_msg or "access denied" in err_msg.lower():
+            return False, f"Access denied. Please check your MySQL username and password for {host}."
+        # 4. Unknown database (Error 1049)
+        elif "1049" in err_msg or "unknown database" in err_msg.lower():
+            return False, f"Database '{db_name}' not found on MySQL instance at {host}."
+        # 5. SSL / TLS required transport (Error 3159)
+        elif "3159" in err_msg or "secure transport" in err_msg.lower():
+            return False, f"SSL/TLS connection error: The MySQL server at {host} requires secure transport. SSL has been enabled."
+        # 6. MySQL server gone away (Error 2006)
+        elif "2006" in err_msg or "gone away" in err_msg.lower():
             return False, "MySQL server has gone away. Connection timed out or server restarted."
+        # 7. Timed out
         elif "timed out" in err_msg.lower() or "timeout" in err_msg.lower():
-            return False, "Database connection timed out. Please check network and server load."
-        return False, f"Unable to connect to the banking database: {err_msg}"
+            return False, f"Database connection to {host}:{port} timed out. Please check network and server load."
+
+        # Generic error with password masked
+        safe_msg = re.sub(r":[^:@]+@", ":******@", err_msg)
+        return False, f"Unable to connect to the banking database: {safe_msg}"
 
 
 def get_connection_diagnostics(engine: Optional[Engine] = None) -> Dict[str, Any]:

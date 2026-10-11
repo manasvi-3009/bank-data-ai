@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: bank-data-ai
+    runtime: python
+    repo: https://github.com/manasvi-3009/bank-data-ai
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.address 0.0.0.0 --server.port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DATABASE_URL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        sync: false
