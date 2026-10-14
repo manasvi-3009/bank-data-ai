@@ -254,6 +254,19 @@ class MockLLMProvider(BaseLLMProvider):
             question_part = user_prompt
 
         lower_prompt = question_part.lower()
+        is_sqlite = "sqlite" in sys_lower
+
+        # Loans started in each year / year analysis
+        if "loan" in lower_prompt and "year" in lower_prompt:
+            if is_sqlite:
+                return (
+                    "SELECT strftime('%Y', Start_Date) AS Loan_Year, COUNT(Loan_ID) AS Total_Loans "
+                    "FROM loans GROUP BY Loan_Year ORDER BY Loan_Year ASC"
+                )
+            return (
+                "SELECT YEAR(Start_Date) AS Loan_Year, COUNT(Loan_ID) AS Total_Loans "
+                "FROM loans GROUP BY Loan_Year ORDER BY Loan_Year ASC"
+            )
 
         # 1. Customers by Branch
         if "customer" in lower_prompt and "branch" in lower_prompt:
@@ -268,7 +281,7 @@ class MockLLMProvider(BaseLLMProvider):
         if "loan" in lower_prompt and ("region" in lower_prompt or "branch" in lower_prompt or "balance" in lower_prompt or "outstanding" in lower_prompt):
             return (
                 "SELECT b.Branch_Name, b.City, b.Region, COUNT(DISTINCT l.Loan_ID) AS Total_Loans, "
-                "SUM(l.Loan_Amount) AS Total_Loan_Amount, AVG(l.Interest_Rate) AS Avg_Interest_Rate "
+                "COALESCE(SUM(l.Loan_Amount), 0) AS Total_Loan_Amount, AVG(l.Interest_Rate) AS Avg_Interest_Rate "
                 "FROM branches b LEFT JOIN accounts a ON b.Branch_ID = a.Branch_ID "
                 "LEFT JOIN loans l ON a.Customer_ID = l.Customer_ID "
                 "GROUP BY b.Branch_ID, b.Branch_Name, b.City, b.Region ORDER BY Total_Loan_Amount DESC"
@@ -362,16 +375,44 @@ class LLMService:
                 return MockLLMProvider()
         return MockLLMProvider()
 
-    def generate_sql(self, user_question: str, schema_context: str) -> str:
+    def generate_sql(
+        self,
+        user_question: str,
+        schema_context: str,
+        dialect: Optional[str] = None,
+    ) -> str:
         """
-        Translates a natural language question into a safe, dialect-correct MySQL query
-        using the dynamically inspected database schema context.
+        Translates a natural language question into a safe, dialect-correct SQL query
+        (SQLite or MySQL) using the dynamically inspected database schema context.
         """
         if not user_question or not user_question.strip():
             raise ValueError("User question cannot be empty.")
 
+        target_dialect = (dialect or ("sqlite" if config.is_sqlite else "mysql")).lower()
+
+        if target_dialect == "sqlite":
+            dialect_rules = (
+                "12. SQLITE DIALECT CONSTRAINTS & DATE HANDLING:\n"
+                "   - Target SQLite 3 dialect.\n"
+                "   - All dates and timestamps are stored as ISO text strings (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS).\n"
+                "   - Use `strftime('%Y', date_col)` instead of `YEAR(date_col)`.\n"
+                "   - Use `strftime('%m', date_col)` instead of `MONTH(date_col)`.\n"
+                "   - Use `strftime(...)` instead of `DATE_FORMAT(...)`.\n"
+                "   - Use `||` for string concatenation instead of `CONCAT(...)`.\n"
+                "   - Use `CASE WHEN ... THEN ... ELSE ... END` instead of `IF(...)`.\n"
+                "   - Do NOT use `DATEDIFF()` or `CURDATE()`. Use `date('now')` or `julianday()` for date arithmetic.\n"
+            )
+            role_desc = "SQLite database financial data engineer and analyst"
+        else:
+            dialect_rules = (
+                "12. MYSQL DIALECT CONSTRAINTS & DATE HANDLING:\n"
+                "   - Target MySQL 8.0+ dialect.\n"
+                "   - Standard MySQL functions like `YEAR()`, `MONTH()`, `DATE_FORMAT()`, `CONCAT()`, `IF()`, `DATEDIFF()`, and `CURDATE()` are permitted.\n"
+            )
+            role_desc = "MySQL database financial data engineer and analyst"
+
         system_prompt = (
-            "You are an expert MySQL database financial data engineer and analyst for a commercial banking database.\n"
+            f"You are an expert {role_desc} for a commercial banking database.\n"
             "Given the provided database schema for `banking_risk_analytics`, generate a single read-only SQL query (SELECT or WITH) "
             "that accurately and efficiently answers the user's question.\n\n"
             "CRITICAL RULES & CONSTRAINTS:\n"
@@ -395,7 +436,7 @@ class LLMService:
             "9. For boolean/categorical filters: In `transactions`, `Is_Fraud` is stored as 'Yes' or 'No' (filter with `UPPER(Is_Fraud) IN ('YES', '1', 'TRUE')` or `Is_Fraud = 'Yes'`). Loan statuses are 'Active', 'Default', 'Closed'. Account statuses are 'Active', 'Inactive'.\n"
             "10. Use `COALESCE(SUM(...), 0)` and sensible alias names (e.g. `Total_Loan_Amount`, `Total_Customers`).\n"
             "11. For queries requesting rankings, largest items, or open-ended lists, apply a sensible LIMIT clause (e.g. LIMIT 10).\n"
-            "12. Target MySQL 8.0+ dialect.\n"
+            f"{dialect_rules}"
             "13. Never expose secrets, credentials, or injection payloads."
         )
 

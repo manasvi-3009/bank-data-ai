@@ -170,25 +170,28 @@ def render_sidebar() -> Tuple[bool, Dict[str, Any]]:
 
         # Database Status Card
         st.markdown("**Database Connection:**")
+        backend = diagnostics.get("backend", config.database_backend)
         if not config.is_database_configured:
             st.markdown(
                 '<span class="status-badge status-badge-red">🔴 Not Configured</span>',
                 unsafe_allow_html=True,
             )
-            st.caption("`DATABASE_URL` is missing from environment.")
+            st.caption("`DATABASE_URL` is missing and `data/bank_data.db` not found.")
         elif is_connected:
             latency = diagnostics.get("latency_ms", "—")
             st.markdown(
                 f'<span class="status-badge status-badge-green">🟢 Connected ({latency}ms)</span>',
                 unsafe_allow_html=True,
             )
+            st.caption(f"**Backend:** `{backend}`")
             st.caption(f"**Database:** `{diagnostics.get('database_name')}`")
-            st.caption(f"**Host:** `{config.get_masked_db_url()}`")
+            st.caption(f"**Source:** `{config.get_masked_db_url()}`")
         else:
             st.markdown(
                 '<span class="status-badge status-badge-red">🔴 Disconnected</span>',
                 unsafe_allow_html=True,
             )
+            st.caption(f"**Backend:** `{backend}`")
             st.caption(f"**Status:** {diagnostics.get('status_message')}")
 
         st.divider()
@@ -259,7 +262,7 @@ def render_schema_explorer(is_connected: bool) -> None:
     with st.expander("📚 Dynamic Database Schema Explorer", expanded=False):
         if not is_connected:
             st.info(
-                "🔒 **Database disconnected.** Connect MySQL hosting `banking_risk_analytics` "
+                f"🔒 **Database disconnected.** Connect {config.database_backend} hosting banking data "
                 "to inspect real tables, columns, and foreign key relations dynamically."
             )
             return
@@ -278,7 +281,7 @@ def render_schema_explorer(is_connected: bool) -> None:
             m1, m2, m3 = st.columns(3)
             m1.metric("Discovered Tables", len(table_names))
             m2.metric("Total Schema Columns", total_cols)
-            m3.metric("Access Mode", "Strict Read-Only")
+            m3.metric("Backend", f"{config.database_backend} (Read-Only)")
 
             st.markdown("**Discovered Banking Tables:**")
             chips = " ".join([f'<span class="table-chip">📋 {t}</span>' for t in table_names])
@@ -509,12 +512,12 @@ def main():
     if not config.is_database_configured:
         st.warning(
             "⚠️ **Database is not configured.** Please configure `DATABASE_URL` in your environment "
-            "(e.g., `mysql+pymysql://user:password@localhost:3306/banking_risk_analytics` for local MySQL, "
-            "or your remote Aiven MySQL Service URI)."
+            "(e.g., `mysql+pymysql://user:password@localhost:3306/banking_risk_analytics` for MySQL, "
+            "or provide `data/bank_data.db` for SQLite)."
         )
     elif not is_connected:
         st.error(
-            f"🔴 **Database connection offline:** {diagnostics.get('status_message', 'Unable to reach MySQL server')}."
+            f"🔴 **Database connection offline ({config.database_backend}):** {diagnostics.get('status_message', 'Unable to reach database')}."
         )
 
     # Collapsible Dynamic Schema Explorer

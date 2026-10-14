@@ -131,12 +131,28 @@ class TestDatabaseModule(unittest.TestCase):
 
     def test_get_connection_diagnostics_unconfigured(self):
         """Verifies get_connection_diagnostics handles unconfigured state cleanly."""
+        from pathlib import Path
+        original = os.environ.get("DATABASE_URL")
+        try:
+            os.environ["DATABASE_URL"] = ""
+            with patch("config.DEFAULT_SQLITE_PATH", Path("nonexistent/bank_data.db")):
+                diag = db.get_connection_diagnostics(engine=None)
+                self.assertFalse(diag["is_connected"])
+                self.assertIn("not configured", diag["status_message"])
+        finally:
+            if original is not None:
+                os.environ["DATABASE_URL"] = original
+            else:
+                os.environ.pop("DATABASE_URL", None)
+
+    def test_get_connection_diagnostics_sqlite_fallback(self):
+        """Verifies get_connection_diagnostics connects to bundled SQLite when DATABASE_URL is unset."""
         original = os.environ.get("DATABASE_URL")
         try:
             os.environ["DATABASE_URL"] = ""
             diag = db.get_connection_diagnostics(engine=None)
-            self.assertFalse(diag["is_connected"])
-            self.assertIn("not configured", diag["status_message"])
+            self.assertTrue(diag["is_connected"])
+            self.assertEqual(diag["backend"], "SQLite")
         finally:
             if original is not None:
                 os.environ["DATABASE_URL"] = original

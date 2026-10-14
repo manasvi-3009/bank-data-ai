@@ -1,15 +1,25 @@
-# 🏦 Bank Data AI view
+# 🏦 Bank Data AI
 
 > **Natural-Language-to-SQL Analytics Assistant for Commercial Banking Data**  
-> Transform plain English financial inquiries into secure, read-only MySQL queries with dynamic schema discovery, automated security guardrails, interactive charts, and AI-generated executive summaries.
+> Transform plain English financial inquiries into secure, read-only SQL queries with dynamic schema discovery, automated security guardrails, interactive charts, and AI-generated executive summaries.
 
 ---
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://YOUR-APP-NAME.streamlit.app)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.30+-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://streamlit.io/)
 [![MySQL](https://img.shields.io/badge/MySQL-8.0+-4479A1?style=for-the-badge&logo=mysql&logoColor=white)](https://www.mysql.com/)
+[![SQLite](https://img.shields.io/badge/SQLite-Bundled-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
 [![Gemini API](https://img.shields.io/badge/Google%20Gemini-API-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white)](https://ai.google.dev/)
-[![Render](https://img.shields.io/badge/Deploy%20to-Render-46E3B7?style=for-the-badge&logo=render&logoColor=white)](https://render.com/)
+
+---
+
+### 🌐 Live Demo
+
+Explore the live interactive application on Streamlit Community Cloud:  
+👉 **[Launch Bank Data AI Demo (https://YOUR-APP-NAME.streamlit.app)](https://YOUR-APP-NAME.streamlit.app)**
+
+> **📌 Deployment Note:** The public demo runs on a self-contained SQLite snapshot (`data/bank_data.db`) of the synthetic commercial banking dataset (12,312 records across 7 relational tables) without requiring an external hosted database. Local development can use either this SQLite snapshot or a local MySQL instance.
 
 ---
 
@@ -17,7 +27,7 @@
 
 **Bank Data AI** is an intelligent conversational analytics platform designed for exploring relational banking databases without requiring manual SQL authoring. 
 
-Non-technical financial analysts, risk officers, and branch managers can ask complex business questions in plain English. The platform dynamically inspects the database schema, constructs dialect-accurate MySQL 8.0+ queries via Google Gemini, passes the SQL through a strict multi-layer read-only validation firewall, executes the query against live MySQL tables, and delivers:
+Non-technical financial analysts, risk officers, and branch managers can ask complex business questions in plain English. The platform dynamically inspects the database schema, constructs dialect-accurate SQL queries (supporting MySQL 8.0+ and SQLite) via Google Gemini, passes the SQL through a strict multi-layer read-only validation firewall, executes the query against relational banking tables, and delivers:
 1. **Interactive Tabular Results** with execution latency and record count metrics.
 2. **Adaptive Dynamic Visualizations** (metrics cards, category bar charts, time-series lines, scatter plots, and distribution histograms).
 3. **AI Executive Summaries** that distill the query output into actionable business takeaways and risk highlights.
@@ -294,7 +304,7 @@ Analytical AI platforms querying databases must enforce zero-trust security guar
 This project utilizes the exact same synthetic banking dataset (`banking_risk_analytics`) as my **Enterprise Banking Risk Analytics** Power BI project, illustrating how the same enterprise data foundation can be analyzed across two distinct paradigms:
 
 * **In Power BI (Visual Modeling & BI)**: Pre-aggregated star schema data models, complex DAX financial metrics, branch performance heatmaps, and scheduled compliance reports.
-* **In Bank Data AI (Conversational AI & Agentic SQL)**: Ad-hoc exploratory questions, dynamic schema discovery, automated SQL generation, and real-time executive summaries.
+* **In Bank Data AI (Conversational AI & Agentic SQL)**: Ad-hoc exploratory questions, dynamic schema discovery, automated SQL generation, and dynamic executive summaries.
 
 Together, both projects demonstrate an end-to-end data engineering and analytics competency — from structured BI modeling to generative AI copilots.
 

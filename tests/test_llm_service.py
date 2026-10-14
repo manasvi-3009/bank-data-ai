@@ -116,6 +116,44 @@ class TestLLMService(unittest.TestCase):
         with self.assertRaises(LLMConfigurationError):
             AnthropicProvider(api_key="")
 
+    def test_generate_sql_dialect_sqlite(self):
+        """Verifies system prompt includes SQLite rules when dialect is sqlite."""
+        mock_provider = MagicMock()
+        mock_provider.generate_text.return_value = "SELECT 1"
+        service = LLMService(provider=mock_provider)
+
+        service.generate_sql("How many loans started in each year?", "Schema context", dialect="sqlite")
+        system_prompt = mock_provider.generate_text.call_args[0][0]
+
+        self.assertIn("SQLite database financial data engineer", system_prompt)
+        self.assertIn("strftime", system_prompt)
+        self.assertIn("||", system_prompt)
+        self.assertIn("CASE WHEN", system_prompt)
+        self.assertIn("DATEDIFF", system_prompt)
+
+    def test_generate_sql_dialect_mysql(self):
+        """Verifies system prompt includes MySQL rules when dialect is mysql."""
+        mock_provider = MagicMock()
+        mock_provider.generate_text.return_value = "SELECT 1"
+        service = LLMService(provider=mock_provider)
+
+        service.generate_sql("How many loans started in each year?", "Schema context", dialect="mysql")
+        system_prompt = mock_provider.generate_text.call_args[0][0]
+
+        self.assertIn("MySQL database financial data engineer", system_prompt)
+        self.assertIn("MySQL 8.0+", system_prompt)
+
+    def test_mock_provider_dialect_awareness_for_dates(self):
+        """Verifies MockLLMProvider outputs strftime for SQLite and YEAR for MySQL."""
+        mock = MockLLMProvider()
+        service = LLMService(provider=mock)
+
+        sql_sqlite = service.generate_sql("How many loans started in each year?", "Schema context", dialect="sqlite")
+        self.assertIn("strftime('%Y', Start_Date)", sql_sqlite)
+
+        sql_mysql = service.generate_sql("How many loans started in each year?", "Schema context", dialect="mysql")
+        self.assertIn("YEAR(Start_Date)", sql_mysql)
+
 
 if __name__ == "__main__":
     unittest.main()

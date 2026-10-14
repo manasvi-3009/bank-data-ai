@@ -97,12 +97,12 @@ def get_db_engine(db_url: Optional[str] = None, force_new: bool = False) -> Engi
     Uses connection pooling, pre-ping, and connection timeouts to ensure stability.
     """
     global _engine
-    target_raw = db_url or config.database_url
+    target_raw = config.database_url if db_url is None else db_url
 
     if not target_raw:
         raise DatabaseConfigurationError(
-            "DATABASE_URL is not configured. Please set it in your environment or .env file "
-            "(e.g., mysql+pymysql://user:pass@localhost:3306/banking_risk_analytics)."
+            "DATABASE_URL is not configured and data/bank_data.db was not found. "
+            "Please configure DATABASE_URL in your environment or provide data/bank_data.db."
         )
 
     target_url, extra_connect_args = normalize_db_url(target_raw)
@@ -152,6 +152,11 @@ def test_connection(engine: Optional[Engine] = None) -> Tuple[bool, str]:
 
     try:
         eng = engine or get_db_engine()
+        if eng.dialect.name == "sqlite":
+            with eng.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return True, "Database connection established successfully (SQLite)."
+
         url_obj = getattr(eng, "url", None)
         if url_obj is not None and hasattr(url_obj, "host") and isinstance(url_obj.host, str):
             host = url_obj.host
@@ -225,6 +230,7 @@ def get_connection_diagnostics(engine: Optional[Engine] = None) -> Dict[str, Any
     diagnostics: Dict[str, Any] = {
         "is_configured": config.is_database_configured,
         "database_name": config.database_name,
+        "backend": config.database_backend,
         "masked_url": masked_url,
         "is_connected": False,
         "status_message": "",
@@ -234,12 +240,13 @@ def get_connection_diagnostics(engine: Optional[Engine] = None) -> Dict[str, Any
     }
 
     if not config.is_database_configured and engine is None:
-        diagnostics["status_message"] = "DATABASE_URL is not configured in .env."
+        diagnostics["status_message"] = "Database is not configured (missing DATABASE_URL and data/bank_data.db)."
         return diagnostics
 
     try:
         eng = engine or get_db_engine()
         diagnostics["dialect"] = eng.dialect.name
+        diagnostics["backend"] = "SQLite" if eng.dialect.name == "sqlite" else "MySQL"
         start_time = time.perf_counter()
         with eng.connect() as conn:
             conn.execute(text("SELECT 1"))
@@ -247,7 +254,8 @@ def get_connection_diagnostics(engine: Optional[Engine] = None) -> Dict[str, Any
 
         diagnostics["is_connected"] = True
         diagnostics["latency_ms"] = elapsed_ms
-        diagnostics["status_message"] = f"Connected ({elapsed_ms}ms latency)."
+        backend_name = diagnostics["backend"]
+        diagnostics["status_message"] = f"Connected ({backend_name}, {elapsed_ms}ms latency)."
 
         try:
             inspector = inspect(eng)
