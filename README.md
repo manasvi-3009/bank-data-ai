@@ -3,7 +3,7 @@
 > **Natural-Language-to-SQL Analytics Assistant for Commercial Banking Data**  
 > Transform plain English financial inquiries into secure, read-only SQL queries with dynamic schema discovery, automated security guardrails, interactive charts, and AI-generated executive summaries.
 
----
+------
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://YOUR-APP-NAME.streamlit.app)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
