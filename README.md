@@ -1,7 +1,7 @@
 # 🏦 Bank Data AI
 
 > **Natural-Language-to-SQL Analytics Assistant for Commercial Banking Data**  
-> Transform plain English financial inquiries into secure, read-only SQL queries with dynamic schema discovery, automated security guardrails, interactive charts, and AI-generated executive summary.
+> Transform plain English financial inquiries into secure, read-only SQL queries with dynamic schema discovery, automated security guardrails, interactive charts, and AI-generated executive summaries.
 
 ---
 
